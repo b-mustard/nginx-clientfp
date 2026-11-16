@@ -102,6 +102,6 @@ def check(deb: Path, openssl_libs: list[Path]) -> Report:
 
 def lintian(deb: Path) -> int:
     """Run lintian; returns its exit code (errors are reported, the caller decides)."""
-    proc = run(["lintian", "--no-tag-display-limit", "--suppress-tags-from-file",
+    proc = run(["lintian", "--tag-display-limit", "0", "--suppress-tags-from-file",
                 Path(__file__).resolve().parent / "lintian-suppress", deb], check=False)
     return proc.returncode
