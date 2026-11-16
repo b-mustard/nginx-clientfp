@@ -1,0 +1,7 @@
+etc/nginx/conf.d
+etc/nginx/modules-available
+etc/nginx/modules-enabled
+etc/nginx/sites-enabled
+usr/lib/nginx/modules
+var/lib/nginx
+var/log/nginx

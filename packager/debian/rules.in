@@ -1,0 +1,61 @@
+#!/usr/bin/make -f
+# Rendered by packager/debian.py. Source tree layout: nginx/ (patched), openssl/, clientfp/ (module), debian/.
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+DPKG_EXPORT_BUILDFLAGS = 1
+include /usr/share/dpkg/buildflags.mk
+
+PKG := debian/nginx-clientfp
+JOBS := $(or $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS))),1)
+
+# OpenSSL is built by nginx's own make rules (auto/lib/openssl/make: no-shared no-threads + these options)
+OPENSSL_OPT := @OPENSSL_OPT@
+
+# -Wl,--exclude-libs,ALL: nginx links with -Wl,-E for dynamic modules; without this flag every symbol of the
+# static libssl.a/libcrypto.a would be exported and could interpose on other libraries' OpenSSL.
+CC_OPT := $(CFLAGS) $(CPPFLAGS) -fPIC
+LD_OPT := $(LDFLAGS) -fPIC -Wl,--exclude-libs,ALL
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	cd nginx && ./auto/configure \
+		@CONFIGURE_ARGS@ \
+		--with-openssl=$(CURDIR)/openssl \
+		--with-openssl-opt="$(OPENSSL_OPT)" \
+		--add-module=$(CURDIR)/clientfp \
+		--with-cc-opt="$(CC_OPT)" \
+		--with-ld-opt="$(LD_OPT)"
+
+override_dh_auto_build:
+	$(MAKE) -C nginx -j$(JOBS) -f objs/Makefile binary manpage
+
+override_dh_auto_test:
+	nginx/objs/nginx -V
+
+override_dh_auto_install:
+	install -D -m 0755 nginx/objs/nginx $(PKG)/usr/sbin/nginx
+	install -d $(PKG)/etc/nginx
+	for f in fastcgi.conf fastcgi_params koi-utf koi-win mime.types scgi_params uwsgi_params win-utf; do \
+		install -m 0644 nginx/conf/$$f $(PKG)/etc/nginx/$$f; \
+	done
+	cd debian/extra && find etc -type f | while read f; do install -D -m 0644 "$$f" "$(CURDIR)/$(PKG)/$$f"; done
+	install -D -m 0644 debian/extra/usr/share/vim/registry/nginx.yaml $(PKG)/usr/share/vim/registry/nginx.yaml
+	for d in ftdetect ftplugin indent syntax; do \
+		install -D -m 0644 nginx/contrib/vim/$$d/nginx.vim $(PKG)/usr/share/vim/addons/$$d/nginx.vim; \
+	done
+	install -D -m 0644 nginx/docs/html/index.html $(PKG)/usr/share/nginx/html/index.html
+	install -D -m 0644 nginx/docs/html/50x.html $(PKG)/usr/share/nginx/html/50x.html
+	install -D -m 0644 debian/extra/index.nginx-debian.html $(PKG)/usr/share/nginx/html/index.nginx-debian.html
+
+override_dh_auto_clean:
+
+override_dh_installinit:
+	dh_installinit --no-stop-on-upgrade --no-start --name=nginx
+
+override_dh_installsystemd:
+	dh_installsystemd --name=nginx
+
+override_dh_installlogrotate:
+	dh_installlogrotate --name=nginx

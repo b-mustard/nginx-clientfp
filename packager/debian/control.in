@@ -1,0 +1,25 @@
+Source: nginx-clientfp
+Section: httpd
+Priority: optional
+Maintainer: nginx-clientfp maintainers <noreply@example.com>
+Build-Depends: debhelper-compat (= 13), libpcre2-dev, zlib1g-dev, perl, binutils
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Homepage: https://nginx.org
+
+Package: nginx-clientfp
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: ssl-cert
+Conflicts: nginx, nginx-common, nginx-core, nginx-full, nginx-light, nginx-extras
+Replaces: nginx, nginx-common, nginx-core, nginx-full, nginx-light, nginx-extras
+Provides: nginx, httpd, httpd-cgi
+Description: nginx @NGINX_VERSION@ with JA4 and HTTP/2 client fingerprinting
+ nginx web and reverse proxy server, statically linked with OpenSSL
+ @OPENSSL_VERSION@, plus ngx_http_clientfp_module. The module computes the JA4
+ TLS client fingerprint and the Akamai HTTP/2 client fingerprint of every
+ connection, exposes them as $clientfp_* variables and can pass them to
+ upstream servers as request headers that clients cannot spoof.
+ .
+ Debian/Ubuntu file layout (sites-available, sites-enabled, snippets,
+ modules-enabled). Replaces the distribution's nginx packages.

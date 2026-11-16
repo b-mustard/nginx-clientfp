@@ -20,3 +20,4 @@ Every engineering decision, automatic or human (workflow rule h2), gets one file
 | 014 | [JA4 capture details in the module](decision_014.md) | automatic |
 | 015 | [HTTP/2 hook details](decision_015.md) | automatic |
 | 016 | [Directive semantics](decision_016.md) | automatic |
+| 017 | [OpenSSL build options and symbol hiding](decision_017.md) | automatic |
