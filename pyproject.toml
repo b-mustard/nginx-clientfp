@@ -38,6 +38,7 @@ clientfp-ja4-probe = "clientfp.probe.ja4_probe:main"
 clientfp-h2-probe = "clientfp.probe.h2_probe:main"
 clientfp-h2-clients = "clientfp.probe.h2_clients:main"
 clientfp-h2 = "clientfp.fp.h2:main"
+clientfp-tlsfp = "clientfp.fp.tlsfp:main"
 clientfp-ja4-harness-check = "clientfp.probe.ja4_harness_check:main"
 
 [tool.setuptools.packages.find]
