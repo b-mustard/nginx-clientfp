@@ -4,7 +4,9 @@ nginx-clientfp-ctest image and checked against the Python reference implementati
 - every captured ClientHello in doc/ja4_vectors.json gives the recorded JA4 in all four forms;
 - differential testing on many mutated hellos: the C parser accepts exactly what the reference accepts and
   formats the same strings; ASan/UBSan abort the driver on any memory error;
-- HTTP/2: hook-event sequences derived from frame sequences give the reference fingerprint.
+- HTTP/2: hook-event sequences derived from frame sequences give the reference fingerprint;
+- TLSFP: the same hellos, mutated hellos and hellos with corrupted inner lists give the reference's TLSFP (including
+  the fields emptied by spec §9), with no cap on list sizes.
 """
 
 from __future__ import annotations
@@ -19,6 +21,8 @@ from pathlib import Path
 import pytest
 
 from clientfp.fp import ja4 as ref_ja4
+from clientfp.fp import tlsfp as ref_tlsfp
+from clientfp.fp.tls import Extension, encode_client_hello, parse_client_hello
 
 from .conftest import REPO
 
@@ -50,7 +54,7 @@ def drivers(require_docker: None) -> Path:
     digest = hashlib.sha256(b"".join(p.read_bytes() for p in srcs)).hexdigest()
     stamp = OUT / "drivers.sha256"
     if not stamp.exists() or stamp.read_text() != digest:
-        for d in ("ja4", "h2"):
+        for d in ("ja4", "h2", "tlsfp"):
             _docker("gcc", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined",
                     "-fno-sanitize-recover=all", "-Inginx_module/src", "-o", f"build/ctest/{d}_driver",
                     f"tests/c/{d}_driver.c", f"nginx_module/src/clientfp_{d}.c", "-lcrypto")
@@ -316,3 +320,126 @@ def test_h2_hostile_events(drivers: Path) -> None:
     assert res[2][1] == "|00|0|m,p,s,a"
     assert res[3][1] == "|00|0|p"
     assert res[4][1] == "|2147483647|0|"
+
+
+# ------------------------------------------------------------------------------------------------- TLSFP
+
+
+def run_tlsfp(hellos: list[tuple[str, bytes]]) -> list[tuple[int, str]]:
+    stdin = "".join(f"{proto} {msg.hex()}\n" for proto, msg in hellos)
+    out = _docker("build/ctest/tlsfp_driver", stdin=stdin).splitlines()
+    assert len(out) == len(hellos)
+    res = []
+    for line in out:
+        status, fp = line.split("\t")
+        res.append((int(status), fp))
+    return res
+
+
+def reference_tlsfp(proto: str, msg: bytes) -> str | None:
+    try:
+        return ref_tlsfp.compute(parse_client_hello(msg), "q" if proto == "q" else "t").tlsfp
+    except ValueError:
+        return None
+
+
+def _check_tlsfp(cases: list[tuple[str, bytes]]) -> tuple[int, set[str]]:
+    """Compare C and reference on every case; return (#accepted, shapes of the accepted results)."""
+    accepted, shapes = 0, set()
+    for (proto, msg), (status, fp) in zip(cases, run_tlsfp(cases)):
+        want = reference_tlsfp(proto, msg)
+        if want is None:
+            assert status != 0 and fp == "", f"C accepted what the reference rejects: {msg.hex()}"
+            continue
+        accepted += 1
+        assert (status, fp) == (0, want), f"{proto} {msg.hex()}"
+        shapes.add("".join("x" if part else "-" for part in fp.split("_")))
+    return accepted, shapes
+
+
+def test_tlsfp_vectors(drivers: Path) -> None:
+    cases = [("q" if v["ja4"][0] == "q" else "t", bytes.fromhex(v["client_hello_hex"])) for v in VECTORS]
+    accepted, shapes = _check_tlsfp(cases)
+    assert accepted == len(VECTORS) and shapes == {"xxxx"}
+
+
+def test_tlsfp_differential_mutations(drivers: Path) -> None:
+    rng = random.Random(5)
+    cases: list[tuple[str, bytes]] = []
+    for v in VECTORS:
+        msg = bytes.fromhex(v["client_hello_hex"])
+        cases += [(v["ja4"][0], m) for m in mutations(msg, rng, 120)]
+    accepted, _ = _check_tlsfp(cases)
+    assert accepted > len(cases) // 10
+
+
+def _corrupt_inner(msg: bytes, ext_type: int, rng: random.Random) -> bytes | None:
+    """Rewrite the data of the first `ext_type` extension with a corrupted inner list, keeping every outer length
+    consistent, so only the inside of that extension is malformed."""
+    ch = parse_client_hello(msg)
+    data = ch.ext(ext_type)
+    if data is None:
+        return None
+    b = bytearray(data)
+    kind = rng.randrange(5)
+    if kind == 0 and b:
+        b[0] ^= 0xFF                                            # inner length: way off
+    elif kind == 1 and len(b) >= 2:
+        n = rng.choice((1, -1))
+        if ext_type == 0x002B:
+            b[0] = (b[0] + n) & 0xFF
+        else:
+            v = (int.from_bytes(b[:2], "big") + n) & 0xFFFF
+            b[:2] = v.to_bytes(2, "big")
+    elif kind == 2:
+        b += b"\x00"                                           # trailing byte after the list
+    elif kind == 3:
+        b = b[:-1]                                              # list shorter than declared
+    else:
+        b = bytearray()                                         # no list length at all
+    seen = False
+    fixed = []
+    for orig in ch.extensions:                    # only the first occurrence is rewritten
+        if orig.type == ext_type and not seen:
+            seen = True
+            fixed.append(Extension(ext_type, bytes(b)))
+        else:
+            fixed.append(orig)
+    return encode_client_hello(ch.legacy_version, ch.ciphers, fixed)
+
+
+def test_tlsfp_malformed_inner_lists(drivers: Path) -> None:
+    """Spec §9: a malformed ALPN / supported_versions / signature_algorithms / supported_groups empties a, a, c or d
+    only. Each case must be one the reference still accepts, and C must agree field by field."""
+    rng = random.Random(6)
+    cases: list[tuple[str, bytes]] = []
+    for v in VECTORS:
+        msg = bytes.fromhex(v["client_hello_hex"])
+        for ext in (0x0010, 0x002B, 0x000D, 0x000A):
+            for _ in range(4):
+                m = _corrupt_inner(msg, ext, rng)
+                if m is not None:
+                    cases.append((v["ja4"][0], m))
+    accepted, shapes = _check_tlsfp(cases)
+    assert accepted == len(cases)
+    assert {"-xxx", "xx-x", "xxx-"} <= shapes
+
+
+def test_tlsfp_lists_uncapped(drivers: Path) -> None:
+    """§7.5: counts stop at 99, hash inputs do not. Far beyond JA4's 1024 cap, and the largest lists a 2^24-byte
+    handshake message allows for ciphers."""
+    def sig(n: int) -> tuple[int, bytes]:
+        return 0x000D, (2 * n).to_bytes(2, "big") + b"".join((0x0401 + i).to_bytes(2, "big") for i in range(n))
+
+    def groups(n: int) -> tuple[int, bytes]:
+        return 0x000A, (2 * n).to_bytes(2, "big") + b"".join(((7 * i) & 0xFFFF).to_bytes(2, "big") for i in range(n))
+
+    cases = [
+        ("t", _hello(list(range(0x0100, 0x0100 + 5000)), [])),
+        ("t", _hello([0x1301], [(0x7000 + i, b"") for i in range(3000)])),
+        ("t", _hello([0x1301], [sig(4000), groups(6000)])),
+        ("q", _hello([(0x0100 + i * 3) & 0xFFFF for i in range(32767)], [(0x0010, b"\x00\x03\x02H2")])),
+    ]
+    accepted, _ = _check_tlsfp(cases)
+    assert accepted == len(cases)
+    assert run_tlsfp(cases[:1])[0][1].startswith("t12i9900")

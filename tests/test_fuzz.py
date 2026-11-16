@@ -1,4 +1,4 @@
-"""libFuzzer runs of the module's C cores (t3): tests/fuzz/fuzz_{ja4,h2}.c with ASan + UBSan, seeded with every
+"""libFuzzer runs of the module's C cores (t3): tests/fuzz/fuzz_{ja4,h2,tlsfp}.c with ASan + UBSan, seeded with every
 recorded ClientHello and the HTTP/2 probe cases. `--fuzz-seconds` per target (default 60).
 
 Any crash, sanitizer report, leak or timeout fails the test; the reproducer is kept in build/fuzz/<target>/."""
@@ -32,7 +32,7 @@ def _seed_h2(corpus: Path) -> None:
         (corpus / f"seed{i:02d}").write_bytes(bytes((i * 37 + k * 11) & 0xFF for k in range(64 + 32 * i)))
 
 
-@pytest.mark.parametrize("target", ["ja4", "h2"])
+@pytest.mark.parametrize("target", ["ja4", "h2", "tlsfp"])
 def test_fuzz(drivers: Path, target: str, request: pytest.FixtureRequest) -> None:  # noqa: F811
     seconds = int(request.config.getoption("--fuzz-seconds"))
     work = OUT / target
@@ -40,7 +40,7 @@ def test_fuzz(drivers: Path, target: str, request: pytest.FixtureRequest) -> Non
     if work.exists():
         shutil.rmtree(work)
     corpus.mkdir(parents=True)
-    (_seed_ja4 if target == "ja4" else _seed_h2)(corpus)
+    (_seed_h2 if target == "h2" else _seed_ja4)(corpus)
     rel = work.relative_to(REPO)
     script = (
         f"set -e; clang -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all "
