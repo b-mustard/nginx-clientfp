@@ -437,3 +437,41 @@ def test_tls_handshake_flood(srv: Nginx) -> None:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
             s.sendall(hello)
 
+
+
+# ------------------------------------------------------------------------------------------------- HTTP/1.x
+
+
+def plain_exchange(port: int, data: bytes, timeout: float = 5) -> bytes:
+    got = b""
+    with socket.create_connection(("127.0.0.1", port), timeout=timeout) as s:
+        s.sendall(data)
+        try:
+            while chunk := s.recv(65536):
+                got += chunk
+        except (TimeoutError, ConnectionResetError):
+            pass
+    return got
+
+
+def test_http09_request(srv: Nginx) -> None:
+    """HTTP/0.9 has no header list at all (nginx never initialises it); the header handler must cope."""
+    plain_exchange(srv.h2c, b"GET /echo\r\n")
+
+
+def test_many_spoofed_copies_removed(srv: Nginx) -> None:
+    """300 client copies of a managed header in mixed case, interleaved with other headers: all are removed and the
+    other headers survive in order. (The echo upstream accepts at most 100 header lines, so 38 are kept.)"""
+    lines = []
+    for i in range(300):
+        name = "".join(ch.upper() if (i >> k) & 1 else ch for k, ch in enumerate("x-client-ja4"))
+        lines.append(f"{name}: spoof{i}\r\n" + (f"X-Keep-{i // 8}: {i // 8}\r\n" if i % 8 == 0 else ""))
+    raw = plain_exchange(srv.h2c, ("GET /echo HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n" + "".join(lines)
+                                   + "\r\n").encode())
+    head, _, body = raw.partition(b"\r\n\r\n")
+    assert b" 200 " in head.split(b"\r\n")[0], head
+    echoed = json.loads(body)["headers"]
+    names = [k.lower() for k, _ in echoed]
+    assert "x-client-ja4" not in names                     # cleartext port: no JA4, so nothing is added
+    keeps = [int(v) for k, v in echoed if k.lower().startswith("x-keep-")]
+    assert keeps == list(range(38))
