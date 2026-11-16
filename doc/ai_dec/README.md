@@ -21,3 +21,7 @@ Every engineering decision, automatic or human (workflow rule h2), gets one file
 | 015 | [HTTP/2 hook details](decision_015.md) | automatic |
 | 016 | [Directive semantics](decision_016.md) | automatic |
 | 017 | [OpenSSL build options and symbol hiding](decision_017.md) | automatic |
+| 018 | [Docker builds: rootless detection, build images, tree location](decision_018.md) | automatic |
+| 019 | [Test strategy](decision_019.md) | automatic |
+| 020 | [Debian package details](decision_020.md) | automatic |
+| 021 | [build.sh bootstrap](decision_021.md) | automatic |
