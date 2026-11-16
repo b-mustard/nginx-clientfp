@@ -22,7 +22,7 @@ FORBIDDEN_NEEDED = re.compile(r"^lib(ssl|crypto)\.so")
 # The module and every HTTP/2 hook the nginx patch calls. nginx links with -Wl,-E, so they are in the dynamic symbol
 # table; a missing one means the module or the patch did not make it into the build.
 REQUIRED_SYMBOLS = frozenset({
-    "ngx_http_clientfp_module",
+    "ngx_http_clientfp_module", "clientfp_tlsfp_compute",
     "ngx_http_clientfp_h2_settings_frame", "ngx_http_clientfp_h2_setting", "ngx_http_clientfp_h2_window_update",
     "ngx_http_clientfp_h2_priority", "ngx_http_clientfp_h2_stream", "ngx_http_clientfp_h2_pseudo_header",
     "ngx_http_clientfp_h2_headers_done",

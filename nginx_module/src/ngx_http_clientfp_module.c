@@ -1,5 +1,5 @@
 /*
- * ngx_http_clientfp_module: JA4 and HTTP/2 (Akamai) client fingerprints for nginx.
+ * ngx_http_clientfp_module: JA4, nDPI TLSFP and HTTP/2 (Akamai) client fingerprints for nginx.
  *
  * Directives
  *   clientfp on | off;                        http        default on
@@ -7,11 +7,15 @@
  *
  * Variables
  *   $clientfp_ja4 $clientfp_ja4_r $clientfp_ja4_o $clientfp_ja4_ro
+ *   $clientfp_tlsfp $clientfp_tlsfp_registry
  *   $clientfp_http2 $clientfp_http2_hash $clientfp_http2_overflow
  *
  * JA4: a msg_callback on every server SSL_CTX of http{} captures the first ClientHello of each connection,
  * parses it into compact lists (clientfp_ja4.c) kept in the connection pool, and the strings are formatted on
  * first use. OpenSSL is not patched.
+ *
+ * TLSFP (nDPI TLS client fingerprint, doc/tlsfp_sig.md): computed from the same first ClientHello by its own core
+ * (clientfp_tlsfp.c), independently of JA4, once per handshake; only the 49-byte string is kept (decision 026).
  *
  * HTTP/2: the patched ngx_http_v2.c calls the ngx_http_clientfp_h2_*() hooks below
  * (patches/nginx/<line>/); without the patch the module builds with JA4 only.
@@ -26,6 +30,7 @@
 #include <ngx_http.h>
 
 #include "clientfp_ja4.h"
+#include "clientfp_tlsfp.h"
 
 #if (NGX_HTTP_V2 && defined NGX_HTTP_V2_CLIENTFP_HOOKS)
 #define NGX_HTTP_CLIENTFP_H2  1
@@ -53,11 +58,18 @@ typedef struct {
 } ngx_http_clientfp_srv_conf_t;
 
 
-/* Per TLS connection, in c->pool, attached to the SSL object with ex_data. */
+/*
+ * Per TLS connection, in c->pool, attached to the SSL object with ex_data (its presence marks the first
+ * ClientHello as seen). JA4 and TLSFP are independent: either may be missing while the other is present.
+ */
 typedef struct {
     ngx_int_t                   status;       /* CLIENTFP_OK or an error code */
     clientfp_ja4_t              ja4;
     ngx_str_t                   cache[4];     /* formatted forms, by clientfp_ja4_form_e */
+
+    ngx_int_t                   tlsfp_status; /* CLIENTFP_TLSFP_OK or an error code */
+    size_t                      tlsfp_len;
+    u_char                      tlsfp[CLIENTFP_TLSFP_MAX_LEN];
 } ngx_http_clientfp_ja4_ctx_t;
 
 
@@ -85,6 +97,8 @@ static void ngx_http_clientfp_msg_callback(int write_p, int version, int content
     size_t len, SSL *ssl, void *arg);
 static void *ngx_http_clientfp_palloc(void *pool, size_t size);
 static ngx_int_t ngx_http_clientfp_ja4_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v,
+    uintptr_t data);
+static ngx_int_t ngx_http_clientfp_tlsfp_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v,
     uintptr_t data);
 static ngx_int_t ngx_http_clientfp_h2_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v,
     uintptr_t data);
@@ -150,6 +164,10 @@ ngx_module_t  ngx_http_clientfp_module = {
 #define NGX_HTTP_CLIENTFP_H2_OVERFLOW  2
 
 
+#define NGX_HTTP_CLIENTFP_TLSFP_TEXT      0
+#define NGX_HTTP_CLIENTFP_TLSFP_REGISTRY  1
+
+
 static ngx_http_variable_t  ngx_http_clientfp_vars[] = {
 
     { ngx_string("clientfp_ja4"), NULL, ngx_http_clientfp_ja4_variable,
@@ -163,6 +181,12 @@ static ngx_http_variable_t  ngx_http_clientfp_vars[] = {
 
     { ngx_string("clientfp_ja4_ro"), NULL, ngx_http_clientfp_ja4_variable,
       CLIENTFP_JA4_RO, NGX_HTTP_VAR_NOCACHEABLE, 0 },
+
+    { ngx_string("clientfp_tlsfp"), NULL, ngx_http_clientfp_tlsfp_variable,
+      NGX_HTTP_CLIENTFP_TLSFP_TEXT, NGX_HTTP_VAR_NOCACHEABLE, 0 },
+
+    { ngx_string("clientfp_tlsfp_registry"), NULL, ngx_http_clientfp_tlsfp_variable,
+      NGX_HTTP_CLIENTFP_TLSFP_REGISTRY, NGX_HTTP_VAR_NOCACHEABLE, 0 },
 
     { ngx_string("clientfp_http2"), NULL, ngx_http_clientfp_h2_variable,
       NGX_HTTP_CLIENTFP_H2_TEXT, NGX_HTTP_VAR_NOCACHEABLE, 0 },
@@ -411,6 +435,20 @@ ngx_http_clientfp_palloc(void *pool, size_t size)
 }
 
 
+static void *
+ngx_http_clientfp_tmp_alloc(void *log, size_t size)
+{
+    return ngx_alloc(size, log);
+}
+
+
+static void
+ngx_http_clientfp_tmp_free(void *log, void *p)
+{
+    ngx_free(p);
+}
+
+
 static void
 ngx_http_clientfp_msg_callback(int write_p, int version, int content_type, const void *buf, size_t len,
     SSL *ssl, void *arg)
@@ -449,6 +487,18 @@ ngx_http_clientfp_msg_callback(int write_p, int version, int content_type, const
                       "clientfp: no JA4 for this connection: %s ClientHello (%uz bytes)",
                       ctx->status == CLIENTFP_ETOOBIG ? "oversized" :
                       ctx->status == CLIENTFP_ENOMEM ? "out of memory for" : "malformed", len);
+    }
+
+    /* TLSFP: its own parse of the same message; uncapped lists, temporary memory released before return */
+
+    ctx->tlsfp_status = clientfp_tlsfp_compute(p, len, proto, ctx->tlsfp, &ctx->tlsfp_len,
+                                               ngx_http_clientfp_tmp_alloc, ngx_http_clientfp_tmp_free, c->log);
+
+    if (ctx->tlsfp_status != CLIENTFP_TLSFP_OK) {
+        ngx_log_error(NGX_LOG_INFO, c->log, 0,
+                      "clientfp: no TLSFP for this connection: %s ClientHello (%uz bytes)",
+                      ctx->tlsfp_status == CLIENTFP_TLSFP_EMALFORMED ? "malformed" :
+                      ctx->tlsfp_status == CLIENTFP_TLSFP_ENOMEM ? "out of memory for" : "hash failure on", len);
     }
 
     if (SSL_set_ex_data(ssl, ngx_http_clientfp_ssl_index, ctx) == 0) {
@@ -510,6 +560,47 @@ ngx_http_clientfp_ja4_variable(ngx_http_request_t *r, ngx_http_variable_value_t 
 
     v->data = s->data;
     v->len = s->len;
+    v->valid = 1;
+    v->no_cacheable = 0;
+    v->not_found = 0;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_clientfp_tlsfp_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v, uintptr_t data)
+{
+    ngx_connection_t               *c;
+    ngx_http_clientfp_ja4_ctx_t    *ctx;
+    ngx_http_clientfp_main_conf_t  *fmcf;
+
+    static u_char  registry[] = { '0' + CLIENTFP_TLSFP_REGISTRY };
+
+    v->not_found = 1;
+
+    fmcf = ngx_http_get_module_main_conf(r, ngx_http_clientfp_module);
+    c = r->connection;
+
+    if (!fmcf->enable || c->ssl == NULL || c->ssl->connection == NULL || ngx_http_clientfp_ssl_index == -1) {
+        return NGX_OK;
+    }
+
+    ctx = SSL_get_ex_data(c->ssl->connection, ngx_http_clientfp_ssl_index);
+
+    if (ctx == NULL || ctx->tlsfp_status != CLIENTFP_TLSFP_OK) {
+        return NGX_OK;
+    }
+
+    if (data == NGX_HTTP_CLIENTFP_TLSFP_REGISTRY) {
+        v->data = registry;
+        v->len = sizeof(registry);
+
+    } else {
+        v->data = ctx->tlsfp;
+        v->len = ctx->tlsfp_len;
+    }
+
     v->valid = 1;
     v->no_cacheable = 0;
     v->not_found = 0;
