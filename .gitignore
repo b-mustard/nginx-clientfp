@@ -1,0 +1,30 @@
+# Generated on build (layout rule l1)
+/dist/
+/build/
+/extern_src/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# C build leftovers
+*.o
+*.a
+*.so
+a.out
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
