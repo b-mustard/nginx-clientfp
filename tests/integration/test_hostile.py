@@ -475,3 +475,43 @@ def test_many_spoofed_copies_removed(srv: Nginx) -> None:
     assert "x-client-ja4" not in names                     # cleartext port: no JA4, so nothing is added
     keeps = [int(v) for k, v in echoed if k.lower().startswith("x-keep-")]
     assert keeps == list(range(38))
+
+
+# ------------------------------------------------------------------------------------------------- TLSFP
+
+
+@pytest.mark.parametrize(("ciphers", "exts"), [(1100, 0), (0, 1100), (3000, 2000)])
+def test_tlsfp_uncapped_live(srv: Nginx, ciphers: int, exts: int) -> None:
+    """A real handshake whose lists exceed JA4's 1024 cap (decision 011): JA4 is unavailable, TLSFP is computed
+    over the whole lists (spec §7.5, decision 026) and equals the reference value of the hello actually sent."""
+    from tlslite import HandshakeSettings, TLSConnection
+    from tlslite.extensions import TLSExtension
+    from tlslite.messages import ClientHello as TLClientHello
+
+    from clientfp.fp import tlsfp as ref_tlsfp
+
+    sent: list[bytes] = []
+
+    class Conn(TLSConnection):  # type: ignore[misc]  # tlslite is untyped
+        def _sendMsg(self, msg: object, *a: object, **kw: object) -> object:
+            if isinstance(msg, TLClientHello) and not sent:
+                msg.cipher_suites = msg.cipher_suites + [0x5A00 + i for i in range(ciphers)]
+                msg.extensions = msg.extensions + [TLSExtension(extType=0x7000 + i).create(bytearray())
+                                                   for i in range(exts)]
+                sent.append(bytes(msg.write()))
+            return super()._sendMsg(msg, *a, **kw)
+
+    with socket.create_connection(("127.0.0.1", srv.tls), timeout=20) as raw:
+        c = Conn(raw)
+        c.handshakeClientCert(settings=HandshakeSettings(), serverName="localhost", alpn=[bytearray(b"http/1.1")])
+        c.write(b"GET /fp HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        data = b""
+        while chunk := c.read():
+            data += bytes(chunk)
+        c.close()
+    got = json.loads(data.partition(b"\r\n\r\n")[2])
+    assert got["ja4"] == ""
+    want = ref_tlsfp.from_bytes(sent[0])
+    assert got["tlsfp"] == want.tlsfp and got["tlsfp_registry"] == "1"
+    assert want.a[4:6] == ("99" if ciphers else want.a[4:6]) and want.a[6:8] == ("99" if exts else want.a[6:8])
+    assert want.input_b.count(",") >= ciphers                      # hash input not capped

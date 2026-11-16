@@ -27,15 +27,18 @@ def _headers(echo: dict[str, object], name: str) -> list[str]:
 
 def test_injected_over_http1(nginx_pkg: Nginx) -> None:
     echo = _echo(nginx_pkg.tls)
-    ja4 = fp_json(nginx_pkg.tls)["ja4"]
-    assert _headers(echo, "X-Client-JA4") == [ja4]
+    fp = fp_json(nginx_pkg.tls)
+    assert _headers(echo, "X-Client-JA4") == [fp["ja4"]]
+    assert _headers(echo, "X-Client-TLSFP") == [fp["tlsfp"]] and len(fp["tlsfp"]) == 49
     assert _headers(echo, "X-Client-HTTP2-FP") == []        # HTTP/1.1: empty value, header not added
 
 
 def test_spoofed_headers_removed(nginx_pkg: Nginx) -> None:
     echo = _echo(nginx_pkg.tls, {"X-Client-JA4": "spoofed", "x-client-ja4": "spoofed2",
-                                 "X-CLIENT-HTTP2-FP": "1:1|00|0|m", "X-Other": "kept"})
-    assert _headers(echo, "X-Client-JA4") == [fp_json(nginx_pkg.tls)["ja4"]]
+                                 "X-CLIENT-HTTP2-FP": "1:1|00|0|m", "x-client-tlsfp": "spoofed3", "X-Other": "kept"})
+    fp = fp_json(nginx_pkg.tls)
+    assert _headers(echo, "X-Client-JA4") == [fp["ja4"]]
+    assert _headers(echo, "X-Client-TLSFP") == [fp["tlsfp"]]
     assert _headers(echo, "X-Client-HTTP2-FP") == []
     assert _headers(echo, "X-Other") == ["kept"]
 
@@ -47,12 +50,14 @@ def test_injected_over_http2(nginx_pkg: Nginx) -> None:
     with httpx.Client(http1=False, http2=True, verify=ctx) as c:
         base = f"https://localhost:{nginx_pkg.tls}"
         fp = c.get(f"{base}/fp").json()
-        r = c.get(f"{base}/echo", headers={"X-Client-HTTP2-FP": "spoofed", "X-Client-JA4": "spoofed"})
+        r = c.get(f"{base}/echo", headers={"X-Client-HTTP2-FP": "spoofed", "X-Client-JA4": "spoofed",
+                                            "X-Client-TLSFP": "spoofed"})
         assert r.http_version == "HTTP/2"
         echo = r.json()
     assert fp["akamai_fingerprint"]
     assert _headers(echo, "X-Client-JA4") == [fp["ja4"]]
     assert _headers(echo, "X-Client-HTTP2-FP") == [fp["akamai_fingerprint"]]
+    assert _headers(echo, "X-Client-TLSFP") == [fp["tlsfp"]]
 
 
 def test_server_level_list_replaces_http_level(nginx_pkg: Nginx) -> None:

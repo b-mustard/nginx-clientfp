@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Literal, Protocol, TypedDict
 
-from clientfp.fp import ja4
+from clientfp.fp import ja4, tlsfp
 
 
 @dataclass(frozen=True)
@@ -642,6 +642,7 @@ def run_case(o: Target, name: str, case: Case) -> CaseResult:
         return CaseResult("FAIL", f"FAIL {name}: captured ClientHello does not parse: {e}", None)
     server: dict[str, str]
     server_raw: str | None = None
+    server_tlsfp: str | None = None      # only our nginx reports it (/fp of tests/integration/clientfp-test.conf)
     try:
         j = json.loads(body)
     except ValueError:
@@ -651,6 +652,7 @@ def run_case(o: Target, name: str, case: Case) -> CaseResult:
             server = {k: j[k] for k in FORMS if isinstance(j.get(k), str)}
             raw = (j.get("tls") or {}).get("raw", {}).get("hex")
             server_raw = raw if isinstance(raw, str) else None
+            server_tlsfp = j["tlsfp"] if isinstance(j.get("tlsfp"), str) else None
         else:
             server = {"ja4": body.strip()}
     lines: list[str] = []
@@ -666,6 +668,11 @@ def run_case(o: Target, name: str, case: Case) -> CaseResult:
             if v != forms[k]:
                 ok = False
                 lines.append(f"     {k:6s} local  {forms[k]}\n     {k:6s} server {v}")
+        if server_tlsfp is not None:
+            want_tlsfp = _tlsfp_or_none(hellos[0], proto)
+            if server_tlsfp != want_tlsfp:
+                ok = False
+                lines.append(f"     tlsfp  local  {want_tlsfp}\n     tlsfp  server {server_tlsfp}")
         others = [_ja4_or_none(h, proto) for h in hellos[1:]]
         if server["ja4"] in others:
             lines.append(f"     NOTE: server fingerprinted ClientHello #{others.index(server['ja4']) + 2} (after HRR)")
@@ -675,12 +682,20 @@ def run_case(o: Target, name: str, case: Case) -> CaseResult:
     if server_raw and all(server_raw != h.hex() for h in hellos):
         lines.append("     NOTE: server raw ClientHello differs from captured one")
     extra = f" (+{len(hellos) - 1} more ClientHello)" if len(hellos) > 1 else ""
-    checked = ",".join(k for k in FORMS if k in server)
+    checked = ",".join([k for k in FORMS if k in server] + (["tlsfp"] if server_tlsfp is not None else []))
     head = f"{'PASS' if ok else 'FAIL'} {name:28s} local={local.ja4} server={server['ja4']} [{checked}]{extra}"
     vector = Vector(name=name, server=o.host, server_confirmed=sorted(server) if ok else [],
                     client_hello_hex=hellos[0].hex(), ja4=local.ja4, ja4_r=local.ja4_r, ja4_o=local.ja4_o,
                     ja4_ro=local.ja4_ro)
     return CaseResult("PASS" if ok else "FAIL", "\n".join([head, *lines]), vector)
+
+
+def _tlsfp_or_none(hello: bytes, proto: ja4.Proto) -> str | None:
+    """Reference TLSFP of a captured hello (doc/tlsfp_sig.md); compared only when the server reports one."""
+    try:
+        return tlsfp.from_bytes(hello, proto).tlsfp
+    except ValueError:
+        return None
 
 
 def _ja4_or_none(hello: bytes, proto: ja4.Proto) -> str | None:

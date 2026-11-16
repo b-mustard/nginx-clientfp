@@ -1,8 +1,9 @@
 """Correctness of the fingerprints nginx computes (t1), with real clients and crafted traffic:
 
-- JA4: every case of clientfp-ja4-probe (curl, wget, urllib, httpx, niquests, s_client, curl_cffi browser
-  profiles, tlslite-ng mutated hellos, HTTP/3 over QUIC). The probe captures each ClientHello on the wire,
-  computes JA4 with the reference implementation and compares all four forms nginx returns.
+- JA4 and TLSFP: every case of clientfp-ja4-probe (curl, wget, urllib, httpx, niquests, s_client, curl_cffi
+  browser profiles, tlslite-ng mutated hellos, HTTP/3 over QUIC). The probe captures each ClientHello on the wire,
+  computes JA4 and TLSFP with the reference implementations and compares all four JA4 forms and the TLSFP nginx
+  returns.
 - HTTP/2: the 21 synthetic frame sequences of clientfp-h2-probe and the real clients of clientfp-h2-clients,
   over TLS+ALPN and over cleartext h2c.
 """
@@ -43,6 +44,7 @@ def test_ja4_probe_all_clients(nginx_pkg: Nginx) -> None:
     # nginx (OpenSSL, security level 0 in the test site) completes every crafted hello the probe sends
     assert skipped <= 2, out[-3000:]
     assert re.search(r"^PASS \S*h3\S*\s+local=q13", out, re.M), "no HTTP/3 (QUIC) case passed"
+    assert len(re.findall(r"^PASS .*\[ja4,ja4_r,ja4_o,ja4_ro,tlsfp\]", out, re.M)) == passed, "TLSFP not compared"
 
 
 def _passes(out: str) -> int:
@@ -73,10 +75,12 @@ def test_http1_has_no_h2_fingerprint(nginx_pkg: Nginx) -> None:
     assert fp["protocol"] == "HTTP/1.1"
     assert fp["akamai_fingerprint"] == "" and fp["akamai_fingerprint_hash"] == ""
     assert re.fullmatch(r"t1[23]d\d{4}h1_[0-9a-f]{12}_[0-9a-f]{12}", fp["ja4"])
+    assert re.fullmatch(r"t1[23]d\d{4}h1_[0-9a-f]{12}_[0-9a-f]{12}_[0-9a-f]{12}", fp["tlsfp"])
+    assert fp["tlsfp_registry"] == "1"
 
 
 def test_cleartext_has_no_ja4(nginx_pkg: Nginx) -> None:
     import urllib.request
 
     body = urllib.request.urlopen(f"http://127.0.0.1:{nginx_pkg.h2c}/fp", timeout=10).read().decode()
-    assert '"ja4":""' in body and '"ja4_ro":""' in body
+    assert '"ja4":""' in body and '"ja4_ro":""' in body and '"tlsfp":""' in body and '"tlsfp_registry":""' in body

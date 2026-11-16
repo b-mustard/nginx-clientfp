@@ -67,6 +67,7 @@ def test_packaged_config_valid(nginx_pkg: Nginx) -> None:
     assert "syntax is ok" in out and "test is successful" in out
     conf = nginx_pkg.exec("cat", "/etc/nginx/nginx.conf")
     assert "clientfp_request_header X-Client-JA4 $clientfp_ja4;" in conf
+    assert "clientfp_request_header X-Client-TLSFP $clientfp_tlsfp;" in conf
 
 
 def test_no_openssl_symbols_exported(nginx_pkg: Nginx, tmp_path: Path) -> None:
