@@ -19,6 +19,15 @@ from .util import BuildError, log, run
 FORBIDDEN_NEEDED = re.compile(r"^lib(ssl|crypto)\.so")
 
 
+# The module and every HTTP/2 hook the nginx patch calls. nginx links with -Wl,-E, so they are in the dynamic symbol
+# table; a missing one means the module or the patch did not make it into the build.
+REQUIRED_SYMBOLS = frozenset({
+    "ngx_http_clientfp_module",
+    "ngx_http_clientfp_h2_settings_frame", "ngx_http_clientfp_h2_setting", "ngx_http_clientfp_h2_window_update",
+    "ngx_http_clientfp_h2_priority", "ngx_http_clientfp_h2_stream", "ngx_http_clientfp_h2_pseudo_header",
+    "ngx_http_clientfp_h2_headers_done",
+})
+
 @dataclass
 class Report:
     deb: Path
@@ -27,10 +36,12 @@ class Report:
     dynamic_symbols: int = 0
     openssl_symbols: int = 0
     nginx_v: str = ""
+    missing_hooks: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        return not self.exported_openssl and not any(FORBIDDEN_NEEDED.match(n) for n in self.needed)
+        return (not self.exported_openssl and not self.missing_hooks
+                and not any(FORBIDDEN_NEEDED.match(n) for n in self.needed))
 
 
 def defined_globals(path: Path, *, dynamic: bool) -> set[str]:
@@ -76,11 +87,14 @@ def check(deb: Path, openssl_libs: list[Path]) -> Report:
         report.dynamic_symbols = len(exported)
         report.openssl_symbols = len(openssl)
         report.exported_openssl = sorted(exported & openssl)
+        report.missing_hooks = sorted(REQUIRED_SYMBOLS - exported)
         report.nginx_v = run([binary, "-V"], capture=True, check=False).stdout or ""
 
     log(f"{deb.name}: NEEDED={report.needed}")
     log(f"{deb.name}: {report.dynamic_symbols} exported symbols, {report.openssl_symbols} OpenSSL symbols, "
         f"{len(report.exported_openssl)} OpenSSL symbols exported")
+    if report.missing_hooks:
+        log("module/patch symbols missing from the binary: " + ", ".join(report.missing_hooks))
     if report.exported_openssl:
         log("exported OpenSSL symbols (first 20): " + ", ".join(report.exported_openssl[:20]))
     return report

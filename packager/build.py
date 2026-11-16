@@ -59,8 +59,9 @@ def package(tree_root: Path, target_name: str, jobs: int, lintian: bool = True) 
     libs = [tree_root / "openssl" / ".openssl" / "lib" / name for name in ("libssl.a", "libcrypto.a")]
     report = verify.check(deb, libs)
     if not report.ok:
-        raise BuildError(f"{deb.name}: OpenSSL is dynamically linked or its symbols are exported "
-                         f"(NEEDED={report.needed}, exported={len(report.exported_openssl)})")
+        raise BuildError(f"{deb.name} failed verification: NEEDED={report.needed}, "
+                         f"{len(report.exported_openssl)} OpenSSL symbols exported, "
+                         f"missing module/patch symbols={report.missing_hooks}")
     lint = verify.lintian(deb) if lintian else -1
 
     out = DIST / target_name

@@ -13,6 +13,7 @@ from .model import Versions
 TEMPLATES = Path(__file__).resolve().parent / "debian"
 DOC = Path(__file__).resolve().parent.parent / "doc"
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
+EXAMPLE_FILES = ("echo_server.py", "nginx-echo.conf")
 
 # Debian/Ubuntu paths (decision 002) and the module set of decision 008.
 CONFIGURE_ARGS = [
@@ -97,16 +98,8 @@ def render(dest: Path, v: Versions) -> None:
     (dest / "rules").chmod(0o755)
 
     files = dest / "extra"
-    readme = DOC / "clientfp_module.md"
-    if readme.exists():
-        shutil.copy(readme, files / "README.clientfp.md")
-    else:
-        (files / "README.clientfp.md").write_text("See https://nginx.org and the project README.\n")
+    shutil.copy(DOC / "clientfp_module.md", files / "README.clientfp.md")
     ex = files / "examples"
     ex.mkdir(exist_ok=True)
-    if EXAMPLES.is_dir():
-        for f in sorted(EXAMPLES.iterdir()):
-            if f.is_file() and f.suffix in (".conf", ".py", ".md"):
-                shutil.copy(f, ex / f.name)
-    if not any(ex.iterdir()):
-        (ex / "README").write_text("No examples bundled.\n")
+    for name in EXAMPLE_FILES:            # gs8: a missing example is a build error, not an empty directory
+        shutil.copy(EXAMPLES / name, ex / name)
