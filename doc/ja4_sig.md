@@ -345,7 +345,7 @@ also serves the HTTP/2 work.
   - `--selftest` checks every worked example and ALPN example in the spec, including `JA4_o`.
 - `clientfp-ja4-probe [--ref kittens,thumbprint] [--host H --connect IP --port P --path /x -k] [--case C] [--dump F]`
   (`tools/clientfp/probe/ja4_probe.py`)
-  - Drives 45 cases, using:
+  - Drives 46 cases, using:
     - curl, wget, Python urllib, httpx and niquests;
     - `openssl s_client`;
     - curl_cffi (Chrome, Firefox and Safari over TCP; Chrome over HTTP/3);
@@ -405,6 +405,12 @@ Edge cases (the same values from both servers unless noted):
 | tlslite, unknown extension `1234` sent twice | `t13d4717h1_ace53f506114_76aa05b37b2e` | thumbprint.me only (kittens rejects duplicates) |
 | tlslite, ClientHello split into 9 records of 64 bytes | same as default | record reassembly |
 | tlslite ALPN `a`, `ab cd`, `20 61`, `30 ab`, `61 20`, `30 ab cd 31`, `#x` | `aa ad 21 3b 60 01 28` | ALPN rule |
+
+The tlslite values above were recorded with the tlslite-ng git checkout that came with the specs. The PyPI release
+pinned in `pyproject.toml` (0.8.2) sends one more extension, so the same cases now give `t13d4716h1_…` (or `t13d4719`,
+`t13d4718` and so on) with other `c` hashes. The rules exercised are unchanged. `tests/integration/test_fingerprints.py`
+checks every case against nginx-clientfp itself, using the reference calculator on the captured bytes. It does not
+rely on these recorded strings.
 
 Not verifiable against either reference server. Both refuse these hellos, so the rules come from the spec alone. The
 OpenSSL harness confirms that the bytes are captured exactly ([§5.3](#53-harness-results-in-tree-openssl-420-dev)).
