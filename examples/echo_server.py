@@ -21,6 +21,8 @@ FINGERPRINT_HEADERS = (
     "X-Client-JA4-R",
     "X-Client-JA4-O",
     "X-Client-JA4-RO",
+    "X-Client-TLSFP",
+    "X-Client-TLSFP-Registry",
     "X-Client-HTTP2-FP",
     "X-Client-HTTP2-FP-Hash",
     "X-Client-HTTP2-FP-Overflow",

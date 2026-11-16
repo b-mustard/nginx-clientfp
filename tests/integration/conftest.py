@@ -213,6 +213,7 @@ http {{
     client_body_temp_path /tmp/body; proxy_temp_path /tmp/proxy; fastcgi_temp_path /tmp/fastcgi;
     uwsgi_temp_path /tmp/uwsgi; scgi_temp_path /tmp/scgi;
     clientfp_request_header X-Client-JA4 $clientfp_ja4;
+    clientfp_request_header X-Client-TLSFP $clientfp_tlsfp;
     clientfp_request_header X-Client-HTTP2-FP $clientfp_http2;
 {site}
 }}
