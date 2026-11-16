@@ -17,3 +17,6 @@ Every engineering decision, automatic or human (workflow rule h2), gets one file
 | 011 | [JA4 per-connection storage: compact capped lists](decision_011.md) | human |
 | 012 | [HTTP/2 signature overflow: truncate + flag variable](decision_012.md) | human |
 | 013 | [Defaults: capture and header injection enabled](decision_013.md) | human |
+| 014 | [JA4 capture details in the module](decision_014.md) | automatic |
+| 015 | [HTTP/2 hook details](decision_015.md) | automatic |
+| 016 | [Directive semantics](decision_016.md) | automatic |

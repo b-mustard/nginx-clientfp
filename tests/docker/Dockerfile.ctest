@@ -1,0 +1,6 @@
+# Standalone C tests and libFuzzer targets for nginx_module/src (tests/test_c_core.py, tests/test_fuzz.py).
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends clang libclang-rt-18-dev llvm gcc libc6-dev libssl-dev make \
+ && rm -rf /var/lib/apt/lists/*

@@ -1,0 +1,143 @@
+diff --git a/src/http/v2/ngx_http_v2.c b/src/http/v2/ngx_http_v2.c
+index 35683ab..3944d07 100644
+--- a/src/http/v2/ngx_http_v2.c
++++ b/src/http/v2/ngx_http_v2.c
+@@ -1310,6 +1310,10 @@ ngx_http_v2_state_headers(ngx_http_v2_connection_t *h2c, u_char *pos,
+ 
+     h2c->state.stream = stream;
+ 
++#if (NGX_HTTP_CLIENTFP)
++    ngx_http_clientfp_h2_stream(h2c, h2c->state.sid);
++#endif
++
+     stream->pool = h2c->state.pool;
+     h2c->state.keep_pool = 1;
+ 
+@@ -1775,6 +1779,12 @@ ngx_http_v2_state_process_header(ngx_http_v2_connection_t *h2c, u_char *pos,
+     }
+ 
+     if (header->name.data[0] == ':') {
++
++#if (NGX_HTTP_CLIENTFP)
++        ngx_http_clientfp_h2_pseudo_header(h2c, h2c->state.sid,
++                                           &header->name);
++#endif
++
+         rc = ngx_http_v2_pseudo_header(r, header);
+ 
+         if (rc == NGX_OK) {
+@@ -1906,6 +1916,10 @@ ngx_http_v2_state_header_complete(ngx_http_v2_connection_t *h2c, u_char *pos,
+                                              ngx_http_v2_state_header_complete);
+     }
+ 
++#if (NGX_HTTP_CLIENTFP)
++    ngx_http_clientfp_h2_headers_done(h2c, h2c->state.sid);
++#endif
++
+     stream = h2c->state.stream;
+ 
+     if (stream) {
+@@ -2008,7 +2022,26 @@ ngx_http_v2_state_priority(ngx_http_v2_connection_t *h2c, u_char *pos,
+         return ngx_http_v2_connection_error(h2c, NGX_HTTP_V2_PROTOCOL_ERROR);
+     }
+ 
++#if (NGX_HTTP_CLIENTFP)
++    {
++    uint32_t  dependency;
++
++    if (end - pos < NGX_HTTP_V2_PRIORITY_SIZE) {
++        return ngx_http_v2_state_save(h2c, pos, end,
++                                      ngx_http_v2_state_priority);
++    }
++
++    dependency = ngx_http_v2_parse_uint32(pos);
++
++    ngx_http_clientfp_h2_priority(h2c, h2c->state.sid, dependency >> 31,
++                                  dependency & 0x7fffffff, pos[4] + 1);
++
++    return ngx_http_v2_state_complete(h2c, pos + NGX_HTTP_V2_PRIORITY_SIZE,
++                                      end);
++    }
++#else
+     return ngx_http_v2_state_skip(h2c, pos, end);
++#endif
+ }
+ 
+ 
+@@ -2247,6 +2280,11 @@ ngx_http_v2_state_settings(ngx_http_v2_connection_t *h2c, u_char *pos,
+ 
+     h2c->state.window_delta = 0;
+ 
++#if (NGX_HTTP_CLIENTFP)
++    ngx_http_clientfp_h2_settings_frame(h2c, h2c->state.flags,
++                                        h2c->state.length);
++#endif
++
+     return ngx_http_v2_state_settings_params(h2c, pos, end);
+ }
+ 
+@@ -2272,6 +2310,10 @@ ngx_http_v2_state_settings_params(ngx_http_v2_connection_t *h2c, u_char *pos,
+         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, h2c->connection->log, 0,
+                        "http2 setting %ui:%ui", id, value);
+ 
++#if (NGX_HTTP_CLIENTFP)
++        ngx_http_clientfp_h2_setting(h2c, id, value);
++#endif
++
+         switch (id) {
+ 
+         case NGX_HTTP_V2_INIT_WINDOW_SIZE_SETTING:
+@@ -2503,6 +2545,10 @@ ngx_http_v2_state_window_update(ngx_http_v2_connection_t *h2c, u_char *pos,
+                    "http2 WINDOW_UPDATE frame sid:%ui window:%uz",
+                    h2c->state.sid, window);
+ 
++#if (NGX_HTTP_CLIENTFP)
++    ngx_http_clientfp_h2_window_update(h2c, h2c->state.sid, window);
++#endif
++
+     if (window == 0) {
+         ngx_log_error(NGX_LOG_INFO, h2c->connection->log, 0,
+                       "client sent WINDOW_UPDATE frame "
+diff --git a/src/http/v2/ngx_http_v2.h b/src/http/v2/ngx_http_v2.h
+index 797e3e8..2e59a50 100644
+--- a/src/http/v2/ngx_http_v2.h
++++ b/src/http/v2/ngx_http_v2.h
+@@ -166,6 +166,10 @@ struct ngx_http_v2_connection_s {
+     unsigned                         table_update:1;
+     unsigned                         blocked:1;
+     unsigned                         goaway:1;
++#if (NGX_HTTP_CLIENTFP)
++
++    void                            *clientfp;
++#endif
+ };
+ 
+ 
+@@ -437,4 +441,27 @@ u_char *ngx_http_v2_string_encode(u_char *dst, u_char *src, size_t len,
+ extern ngx_module_t  ngx_http_v2_module;
+ 
+ 
++#if (NGX_HTTP_CLIENTFP)
++
++/* client fingerprint hooks, implemented by ngx_http_clientfp_module */
++
++#define NGX_HTTP_V2_CLIENTFP_HOOKS  1
++
++void ngx_http_clientfp_h2_settings_frame(ngx_http_v2_connection_t *h2c,
++    ngx_uint_t flags, size_t length);
++void ngx_http_clientfp_h2_setting(ngx_http_v2_connection_t *h2c,
++    ngx_uint_t id, ngx_uint_t value);
++void ngx_http_clientfp_h2_window_update(ngx_http_v2_connection_t *h2c,
++    ngx_uint_t sid, size_t window);
++void ngx_http_clientfp_h2_priority(ngx_http_v2_connection_t *h2c,
++    ngx_uint_t sid, ngx_uint_t excl, ngx_uint_t depend, ngx_uint_t weight);
++void ngx_http_clientfp_h2_stream(ngx_http_v2_connection_t *h2c,
++    ngx_uint_t sid);
++void ngx_http_clientfp_h2_pseudo_header(ngx_http_v2_connection_t *h2c,
++    ngx_uint_t sid, ngx_str_t *name);
++void ngx_http_clientfp_h2_headers_done(ngx_http_v2_connection_t *h2c,
++    ngx_uint_t sid);
++
++#endif
++
+ #endif /* _NGX_HTTP_V2_H_INCLUDED_ */

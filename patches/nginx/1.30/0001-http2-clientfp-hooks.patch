@@ -1,0 +1,127 @@
+diff --git a/src/http/v2/ngx_http_v2.c b/src/http/v2/ngx_http_v2.c
+index bea5c88..8d2c01b 100644
+--- a/src/http/v2/ngx_http_v2.c
++++ b/src/http/v2/ngx_http_v2.c
+@@ -1327,6 +1327,10 @@ ngx_http_v2_state_headers(ngx_http_v2_connection_t *h2c, u_char *pos,
+ 
+     h2c->state.stream = stream;
+ 
++#if (NGX_HTTP_CLIENTFP)
++    ngx_http_clientfp_h2_stream(h2c, h2c->state.sid);
++#endif
++
+     stream->pool = h2c->state.pool;
+     h2c->state.keep_pool = 1;
+ 
+@@ -1781,6 +1785,12 @@ ngx_http_v2_state_process_header(ngx_http_v2_connection_t *h2c, u_char *pos,
+     }
+ 
+     if (header->name.data[0] == ':') {
++
++#if (NGX_HTTP_CLIENTFP)
++        ngx_http_clientfp_h2_pseudo_header(h2c, h2c->state.sid,
++                                           &header->name);
++#endif
++
+         rc = ngx_http_v2_pseudo_header(r, header);
+ 
+         if (rc == NGX_OK) {
+@@ -1899,6 +1909,10 @@ ngx_http_v2_state_header_complete(ngx_http_v2_connection_t *h2c, u_char *pos,
+                                              ngx_http_v2_state_header_complete);
+     }
+ 
++#if (NGX_HTTP_CLIENTFP)
++    ngx_http_clientfp_h2_headers_done(h2c, h2c->state.sid);
++#endif
++
+     stream = h2c->state.stream;
+ 
+     if (stream) {
+@@ -2022,6 +2036,10 @@ ngx_http_v2_state_priority(ngx_http_v2_connection_t *h2c, u_char *pos,
+                    "depends on %ui excl:%ui weight:%ui",
+                    h2c->state.sid, depend, excl, weight);
+ 
++#if (NGX_HTTP_CLIENTFP)
++    ngx_http_clientfp_h2_priority(h2c, h2c->state.sid, excl, depend, weight);
++#endif
++
+     if (h2c->state.sid == 0) {
+         ngx_log_error(NGX_LOG_INFO, h2c->connection->log, 0,
+                       "client sent PRIORITY frame with incorrect identifier");
+@@ -2183,6 +2201,11 @@ ngx_http_v2_state_settings(ngx_http_v2_connection_t *h2c, u_char *pos,
+ 
+     h2c->state.window_delta = 0;
+ 
++#if (NGX_HTTP_CLIENTFP)
++    ngx_http_clientfp_h2_settings_frame(h2c, h2c->state.flags,
++                                        h2c->state.length);
++#endif
++
+     return ngx_http_v2_state_settings_params(h2c, pos, end);
+ }
+ 
+@@ -2208,6 +2231,10 @@ ngx_http_v2_state_settings_params(ngx_http_v2_connection_t *h2c, u_char *pos,
+         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, h2c->connection->log, 0,
+                        "http2 setting %ui:%ui", id, value);
+ 
++#if (NGX_HTTP_CLIENTFP)
++        ngx_http_clientfp_h2_setting(h2c, id, value);
++#endif
++
+         switch (id) {
+ 
+         case NGX_HTTP_V2_INIT_WINDOW_SIZE_SETTING:
+@@ -2426,6 +2453,10 @@ ngx_http_v2_state_window_update(ngx_http_v2_connection_t *h2c, u_char *pos,
+                    "http2 WINDOW_UPDATE frame sid:%ui window:%uz",
+                    h2c->state.sid, window);
+ 
++#if (NGX_HTTP_CLIENTFP)
++    ngx_http_clientfp_h2_window_update(h2c, h2c->state.sid, window);
++#endif
++
+     if (window == 0) {
+         ngx_log_error(NGX_LOG_INFO, h2c->connection->log, 0,
+                       "client sent WINDOW_UPDATE frame "
+diff --git a/src/http/v2/ngx_http_v2.h b/src/http/v2/ngx_http_v2.h
+index beb77a5..361c5be 100644
+--- a/src/http/v2/ngx_http_v2.h
++++ b/src/http/v2/ngx_http_v2.h
+@@ -169,6 +169,10 @@ struct ngx_http_v2_connection_s {
+     unsigned                         table_update:1;
+     unsigned                         blocked:1;
+     unsigned                         goaway:1;
++#if (NGX_HTTP_CLIENTFP)
++
++    void                            *clientfp;
++#endif
+ };
+ 
+ 
+@@ -421,4 +425,27 @@ u_char *ngx_http_v2_string_encode(u_char *dst, u_char *src, size_t len,
+ extern ngx_module_t  ngx_http_v2_module;
+ 
+ 
++#if (NGX_HTTP_CLIENTFP)
++
++/* client fingerprint hooks, implemented by ngx_http_clientfp_module */
++
++#define NGX_HTTP_V2_CLIENTFP_HOOKS  1
++
++void ngx_http_clientfp_h2_settings_frame(ngx_http_v2_connection_t *h2c,
++    ngx_uint_t flags, size_t length);
++void ngx_http_clientfp_h2_setting(ngx_http_v2_connection_t *h2c,
++    ngx_uint_t id, ngx_uint_t value);
++void ngx_http_clientfp_h2_window_update(ngx_http_v2_connection_t *h2c,
++    ngx_uint_t sid, size_t window);
++void ngx_http_clientfp_h2_priority(ngx_http_v2_connection_t *h2c,
++    ngx_uint_t sid, ngx_uint_t excl, ngx_uint_t depend, ngx_uint_t weight);
++void ngx_http_clientfp_h2_stream(ngx_http_v2_connection_t *h2c,
++    ngx_uint_t sid);
++void ngx_http_clientfp_h2_pseudo_header(ngx_http_v2_connection_t *h2c,
++    ngx_uint_t sid, ngx_str_t *name);
++void ngx_http_clientfp_h2_headers_done(ngx_http_v2_connection_t *h2c,
++    ngx_uint_t sid);
++
++#endif
++
+ #endif /* _NGX_HTTP_V2_H_INCLUDED_ */
