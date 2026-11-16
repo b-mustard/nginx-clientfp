@@ -35,15 +35,24 @@ END_STREAM, END_HEADERS, PADDED, PRIORITY_FLAG = 0x1, 0x4, 0x8, 0x20
 @pytest.fixture(params=["pkg", "asan"])
 def srv(request: pytest.FixtureRequest) -> Iterator[Nginx]:
     n: Nginx = request.getfixturevalue(f"nginx_{request.param}")
+    offset = mark_logs(n)
     yield n
-    assert_healthy(n)
+    assert_healthy(n, offset)
 
 
-def assert_healthy(n: Nginx) -> None:
+def mark_logs(n: Nginx) -> int:
+    """Set earlier sanitizer reports aside and return the current error-log size, so a test is judged only by what
+    happens during it (a crashed worker is replaced by the master, later tests stay meaningful)."""
+    out = n.exec("sh", "-c", "mkdir -p /tmp/seen; mv /tmp/asan.* /tmp/ubsan.* /tmp/seen/ 2>/dev/null; "
+                 f"cat {n.logs} 2>/dev/null | wc -c", check=False)
+    return int(out.split()[-1])
+
+
+def assert_healthy(n: Nginx, offset: int = 0) -> None:
     assert n.alive(), "nginx stopped answering"
-    report = n.exec("sh", "-c", "cat /tmp/asan* /tmp/ubsan* 2>/dev/null; "
-                    "grep -h 'exited on signal\\|runtime error\\|AddressSanitizer' "
-                    f"{n.logs} 2>/dev/null", check=False)
+    report = n.exec("sh", "-c", "cat /tmp/asan.* /tmp/ubsan.* 2>/dev/null; "
+                    f"cat {n.logs} 2>/dev/null | tail -c +{offset + 1} | "
+                    "grep -h 'exited on signal\\|runtime error\\|AddressSanitizer'", check=False)
     assert report.strip() == "", report[-4000:]
 
 

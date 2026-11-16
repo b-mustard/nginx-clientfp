@@ -14,7 +14,11 @@ from .build import CONTAINER_REPO, docker_user_args, ensure_image
 from .model import TARGETS, Versions
 from .util import REPO, run
 
-SAN = "-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+# nginx does unaligned 16/32-bit loads and stores on purpose where the CPU allows them (NGX_HAVE_NONALIGNED, set on
+# x86), so UBSan's alignment check would abort on upstream code paths. The module's C cores keep the full check in
+# tests/test_c_core.py and tests/test_fuzz.py.
+SAN = ("-fsanitize=address,undefined -fno-sanitize=alignment -fno-sanitize-recover=undefined "
+       "-fno-omit-frame-pointer")
 
 CONFIGURE = [
     "--with-debug",

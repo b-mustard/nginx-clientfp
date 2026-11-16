@@ -50,7 +50,7 @@ class Nginx:
 
     def exec(self, *cmd: str, check: bool = True) -> str:
         proc = subprocess.run(["docker", "exec", self.container, *cmd], capture_output=True, text=True,
-                              check=False)
+                              errors="replace", check=False)   # logs quote raw client bytes
         if check and proc.returncode != 0:
             raise AssertionError(f"{cmd} failed: {proc.stderr}")
         return proc.stdout + proc.stderr
