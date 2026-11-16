@@ -1,0 +1,8 @@
+# Clean target distro + python3 (echo upstream). Integration tests install the built .deb into it with dpkg -i,
+# which also proves the package's Depends are satisfied by a minimal system.
+ARG BASE=ubuntu:24.04
+FROM ${BASE}
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 ca-certificates procps \
+ && rm -rf /var/lib/apt/lists/*
