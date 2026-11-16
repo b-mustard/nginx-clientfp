@@ -2,7 +2,7 @@
 
 Sources:
 - Akamai white paper, "Passive Fingerprinting of HTTP/2 Clients" (Shuster, Segal, Fridman, Black Hat Europe 2017): <https://www.blackhat.com/docs/eu-17/materials/eu-17-Shuster-Passive-Fingerprinting-Of-HTTP2-Clients-wp.pdf>.
-- Reference implementation `https://kittens.sh/api/http2`. Every rule marked **[verified]** was checked against it on 2026-09-28 with `tools/h2_probe.py` (21/21 synthetic cases pass) and `tools/h2_clients.py` (10/10 real-client cases pass).
+- Reference implementation `https://kittens.sh/api/http2`. Every rule marked **[verified]** was checked against it on 2026-09-28 with `clientfp-h2-probe` (21/21 synthetic cases pass) and `clientfp-h2-clients` (10/10 real-client cases pass).
 - Cross-checks, run the same day (section 4.5). On the fields that real clients send, all three references agree with the spec. Each one departs from it in its own edge cases:
   - `https://tls.browserleaks.com/http2`, the JSON behind `https://browserleaks.com/http2`. It differs on the PRIORITY tuple format, GREASE ids, and frames after HEADERS.
   - `https://thumbprint.me/api/v1/probe`. It differs on the empty-S form, several SETTINGS frames, and the HEADERS priority block.
@@ -138,7 +138,7 @@ The reference also reports `total_frames`: the number of frames received after t
 
 ## 4. Test vectors
 
-### 4.1 Synthetic frame sequences (`tools/h2_probe.py`)
+### 4.1 Synthetic frame sequences (`clientfp-h2-probe`, `tools/clientfp/probe/h2_probe.py`)
 
 The probe sends exact frame sequences: these cases and 16 more edge cases, one for each rule in section 2. All values below match the reference fingerprint and MD5 hash.
 
@@ -150,7 +150,7 @@ The probe sends exact frame sequences: these cases and 16 more edge cases, one f
 | empty SETTINGS | S{} WU 1000, H(mpas) | `\|1000\|0\|m,p,a,s` | `b90ba10e3fa878e6c299ce7811dbe44c` |
 | exclusive, max weight | S{1:65536} WU 1000, PRIO(3, E=1, dep 0, wire 255), H(masp) | `1:65536\|1000\|3:1:0:256\|m,a,s,p` | `535bd3c91efe1d901175a6437636a79a` |
 
-### 4.2 Real clients in this environment (`tools/h2_clients.py`)
+### 4.2 Real clients in this environment (`clientfp-h2-clients`, `tools/clientfp/probe/h2_clients.py`)
 
 All values were captured from the reference on 2026-09-28. The 4 hashes that the reference reported matched the local MD5 values. Every HTTP/2 client also gave the same fingerprint over cleartext h2c (prior knowledge, checked with a local test server). A client's settings do not depend on TLS.
 
@@ -180,23 +180,26 @@ Both tools accept an endpoint that returns JSON with `akamai_fingerprint`, or th
 
 ```sh
 # synthetic frame sequences
-.venv/bin/python tools/h2_probe.py                                                      # reference
-.venv/bin/python tools/h2_probe.py --host 127.0.0.1 --port 8443 --path /fp --insecure    # our nginx
+.venv/bin/clientfp-h2-probe                                                      # reference
+.venv/bin/clientfp-h2-probe --host 127.0.0.1 --port 8443 --path /fp --insecure    # our nginx
 
-# real clients (needs curl, node, wget and .venv from tools/requirements.txt)
-.venv/bin/python tools/h2_clients.py                                                    # reference
-.venv/bin/python tools/h2_clients.py --url https://127.0.0.1:8443/fp --insecure         # our nginx, TLS + ALPN
-.venv/bin/python tools/h2_clients.py --url http://127.0.0.1:8080/fp                     # our nginx, h2c prior knowledge
-.venv/bin/python tools/h2_clients.py --client node_http2                                # one case, prints the version
+# real clients (needs curl, node, wget and .venv/bin/pip install -e '.[dev]')
+.venv/bin/clientfp-h2-clients                                                    # reference
+.venv/bin/clientfp-h2-clients --url https://127.0.0.1:8443/fp --insecure         # our nginx, TLS + ALPN
+.venv/bin/clientfp-h2-clients --url http://127.0.0.1:8080/fp                     # our nginx, h2c prior knowledge
+.venv/bin/clientfp-h2-clients --client node_http2                                # one case, prints the version
 
 # cross-check references (expected differences are listed in 4.5)
-.venv/bin/python tools/h2_probe.py --host tls.browserleaks.com --path /http2
-.venv/bin/python tools/h2_probe.py --host thumbprint.me --path /api/v1/probe
-.venv/bin/python tools/h2_clients.py --url https://tls.browserleaks.com/http2
-.venv/bin/python tools/h2_clients.py --url https://thumbprint.me/api/v1/probe
+.venv/bin/clientfp-h2-probe --host tls.browserleaks.com --path /http2
+.venv/bin/clientfp-h2-probe --host thumbprint.me --path /api/v1/probe
+.venv/bin/clientfp-h2-clients --url https://tls.browserleaks.com/http2
+.venv/bin/clientfp-h2-clients --url https://thumbprint.me/api/v1/probe
+
+# offline: the reference calculator on a captured client stream (preface + frames, hex)
+.venv/bin/python -m clientfp.fp.h2 <hex>
 ```
 
-`h2_clients.py` reports `CHANGED` instead of `FAIL` when the fingerprint differs and the installed client version also differs from the recorded one. In that case, capture a new value from the reference before you look for a server bug.
+`clientfp-h2-clients` reports `CHANGED` instead of `FAIL` when the fingerprint differs and the installed client version also differs from the recorded one. In that case, capture a new value from the reference before you look for a server bug.
 
 Three probe cases test how tolerant the server is, not a fingerprint rule: `dup_setting`, `stream_wu_before_conn_wu` and `stream_wu_only`. RFC 9113 allows a server to reject them, and browserleaks does, with `GOAWAY PROTOCOL_ERROR`. If our nginx rejects them too, that is acceptable. Only a wrong fingerprint on a request that succeeded is a bug.
 
@@ -204,7 +207,7 @@ Three probe cases test how tolerant the server is, not a fingerprint rule: `dup_
 
 #### 4.5.1 Comparison matrix
 
-Every cell was observed with `tools/h2_probe.py`, `tools/h2_clients.py`, or two requests on one connection, on 2026-09-28. **Bold** marks a departure from the spec.
+Every cell was observed with `clientfp-h2-probe`, `clientfp-h2-clients`, or two requests on one connection, on 2026-09-28. **Bold** marks a departure from the spec.
 
 | Rule | Paper | kittens.sh | browserleaks | thumbprint.me | **Spec** |
 |---|---|---|---|---|---|
@@ -242,8 +245,8 @@ akamai_hash: 64a832f547be33249bf4d33e8a46c5dc
 
 **Where it agrees:**
 - **Real clients:** 10/10 match.
-  - 8 match directly with `h2_clients.py --url https://tls.browserleaks.com/http2`.
-  - `httpx` and `h2_bare` fail live because python-h2 aborts on the early GOAWAY (`ConnectionTerminated error_code:0`). I recorded the exact bytes each one sends (after TLS) and replayed them through `h2_probe.run()`. Both gave the expected fingerprint and hash. As a control, the same replay on kittens gives the same result as the live request.
+  - 8 match directly with `clientfp-h2-clients --url https://tls.browserleaks.com/http2`.
+  - `httpx` and `h2_bare` fail live because python-h2 aborts on the early GOAWAY (`ConnectionTerminated error_code:0`). I recorded the exact bytes each one sends (after TLS) and replayed them through `clientfp.probe.h2_probe.run()`. Both gave the expected fingerprint and hash. As a control, the same replay on kittens gives the same result as the live request.
 - **HTTP/1.1:** it returns `200` with an empty `akamai_text`, where kittens returns `404`. Either way, there is no fingerprint.
 - **Synthetic cases:** 12/21 match exactly, including every SETTINGS and WINDOW_UPDATE rule:
   - wire order, unknown ids 8 and 9, u32 values
@@ -330,7 +333,7 @@ Pitfalls:
 - **Partial frames.** nginx parses incrementally and resumes through `ngx_http_v2_state_save` / `h2c->state.handler`. Record each SETTINGS entry only after all 6 octets are present, so a resumed parse does not record it twice.
 - **HPACK state.** Header fields that come from the dynamic table still go through `process_header`, in order. Because only the first request counts, table reuse across requests does not matter.
 - **Rejected first stream.** nginx can refuse a stream (concurrency limit, a GOAWAY in flight) and skip `process_header` for it. A refused first stream is rare. The simplest rule: freeze on the first HEADERS block that nginx processes.
-- **Early GOAWAY breaks python-h2 clients.** When a connection reaches `keepalive_requests`, nginx sends `GOAWAY NO_ERROR` before the response (browserleaks does this on the first request). httpx and python-h2 then drop the response. Keep the default `keepalive_requests` in the test nginx config, or `h2_clients.py` will report false FAILs.
+- **Early GOAWAY breaks python-h2 clients.** When a connection reaches `keepalive_requests`, nginx sends `GOAWAY NO_ERROR` before the response (browserleaks does this on the first request). httpx and python-h2 then drop the response. Keep the default `keepalive_requests` in the test nginx config, or `clientfp-h2-clients` will report false FAILs.
 - **Cleartext h2c** (prior knowledge, `listen … http2` without TLS) uses the same code path, so the same capture applies.
 - **HTTP/3 / QUIC** is out of scope. The frame model is different.
 

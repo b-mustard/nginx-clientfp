@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nginx-clientfp"
+version = "0.1.0"
+description = "Build tooling and tests for nginx with JA4 and HTTP/2 client fingerprinting"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+# Live-client probes and integration tests. Versions are pinned because recorded client fingerprints depend on them
+# (doc/http2_sig.md §4.2, doc/ja4_sig.md §8). niquests pulls urllib3-future, which installs itself as `urllib3`.
+test = [
+    "pytest==8.4.2",
+    "httpx[http2]==0.28.1",
+    "httpcore==1.0.9",
+    "h2==4.4.1",
+    "hpack==4.2.0",
+    "niquests==3.21.2",
+    "urllib3-future==2.25.900",
+    "jh2==5.0.15",
+    "qh3==2.1.0",
+    "curl_cffi==0.16.3",
+    "cryptography",
+    "tlslite-ng==0.8.2",
+    "ecdsa",
+]
+dev = [
+    "nginx-clientfp[test]",
+    "mypy==1.18.2",
+]
+
+[project.scripts]
+clientfp-ja4 = "clientfp.fp.ja4:main"
+clientfp-ja4-probe = "clientfp.probe.ja4_probe:main"
+clientfp-h2-probe = "clientfp.probe.h2_probe:main"
+clientfp-h2-clients = "clientfp.probe.h2_clients:main"
+clientfp-h2 = "clientfp.fp.h2:main"
+clientfp-ja4-harness-check = "clientfp.probe.ja4_harness_check:main"
+
+[tool.setuptools.packages.find]
+where = ["tools", "."]
+include = ["clientfp*", "packager*"]
+
+[tool.setuptools.package-data]
+clientfp = ["py.typed"]
+packager = ["py.typed"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+mypy_path = ["tools", "."]
+explicit_package_bases = true
+files = ["tools/clientfp", "packager", "tests", "examples"]
+
+[[tool.mypy.overrides]]
+module = ["tlslite.*", "ecdsa.*", "curl_cffi.*", "niquests.*", "jh2.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "nginx: needs a built nginx binary (build/<flavor>/...)",
+    "network: talks to public reference servers",
+    "docker: needs docker",
+    "slow: long-running",
+]

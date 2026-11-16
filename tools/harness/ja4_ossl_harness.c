@@ -6,10 +6,11 @@
  * Every HTTP/1.1 request is answered with JSON:
  *   {"raw": "<hex of 1st ClientHello from msg_callback>", "msgcb_count": N, "chcb_count": M,
  *    "msgcb_before_chcb": true|false, "api": {...}}
- * tools/ja4_harness_check.py drives the ja4_probe clients against it.
+ * clientfp.probe.ja4_harness_check (tools/clientfp/probe/ja4_harness_check.py) drives the ja4_probe clients against it.
  *
- * build: cc -o ja4_ossl_harness tools/ja4_ossl_harness.c -I$OSSL/include -L$OSSL/lib64 -lssl -lcrypto
+ * build: cc -o ja4_ossl_harness tools/harness/ja4_ossl_harness.c -I$OSSL/include -L$OSSL/lib64 -lssl -lcrypto
  * run:   LD_LIBRARY_PATH=$OSSL/lib64 ./ja4_ossl_harness 8443 cert.pem key.pem
+ * check: .venv/bin/python -m clientfp.probe.ja4_harness_check --harness ./ja4_ossl_harness --lib $OSSL/lib64
  */
 #include <arpa/inet.h>
 #include <netinet/in.h>

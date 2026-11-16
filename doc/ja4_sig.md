@@ -273,7 +273,7 @@ SSL_CTX_set_msg_callback(ctx, ja4_msg_cb);   /* or SSL_set_msg_callback(ssl, ...
 
 ### 5.3 Harness results (in-tree OpenSSL 4.2.0-dev)
 
-`tools/ja4_ossl_harness.c` is a TLS server using `SSL_CTX_set_msg_callback`, `SSL_CTX_set_client_hello_cb` and
+`tools/harness/ja4_ossl_harness.c` is a TLS server using `SSL_CTX_set_msg_callback`, `SSL_CTX_set_client_hello_cb` and
 the `SSL_client_hello_*` getters. It uses an RSA certificate at security level 0, so that it also completes hellos the
 reference servers refuse. It ran against 22 clients from the probe, and all 22 passed:
 
@@ -299,8 +299,8 @@ Reproduce:
 
 ```
 Configure --prefix=... no-docs no-tests shared && make build_libs     # out-of-tree build of openssl/
-cc -o ja4_ossl_harness tools/ja4_ossl_harness.c -I$B/include -Iopenssl/include -L$B -lssl -lcrypto
-.venv/bin/python tools/ja4_harness_check.py --harness ./ja4_ossl_harness --lib $B
+cc -o ja4_ossl_harness tools/harness/ja4_ossl_harness.c -I$B/include -Iopenssl/include -L$B -lssl -lcrypto
+.venv/bin/python -m clientfp.probe.ja4_harness_check --harness ./ja4_ossl_harness --lib $B
 ```
 
 ## 6. Values the nginx side should expose
@@ -329,21 +329,22 @@ Python and both reference servers.
 
 ## 8. Verification
 
-Tools, all run with the project `.venv`. Install their dependencies with:
+Tools, all run with the project `.venv`. They are the `clientfp` package in `tools/clientfp/`. Install it and its
+dependencies with:
 
 ```
-.venv/bin/pip install ./openssl/python-ecdsa ./openssl/tlslite-ng curl_cffi==0.16.3 cryptography
-rm -rf openssl/tlslite-ng/tlslite_ng.egg-info      # pip leaves this in the submodule
+.venv/bin/pip install -e '.[dev]'      # the `test` extra of pyproject.toml holds the probe clients
 ```
 
 `curl_cffi` is pinned because the Chrome, Firefox and Safari JA4 values depend on its browser profiles. `cryptography`
-decrypts QUIC Initial packets. httpx, niquests and qh3 come from `tools/requirements.txt`, which belongs to the HTTP/2
-work.
+decrypts QUIC Initial packets. httpx, niquests and qh3 (pulled in by niquests) come from the same `test` extra, which
+also serves the HTTP/2 work.
 
-- `tools/ja4.py`
+- `clientfp-ja4 <hex> [--proto t|q|d]` / `clientfp-ja4 --selftest` (`tools/clientfp/fp/ja4.py`)
   - Reference implementation: raw hello → `ja4`, `ja4_r`, `ja4_o`, `ja4_ro`.
   - `--selftest` checks every worked example and ALPN example in the spec, including `JA4_o`.
-- `tools/ja4_probe.py [--ref kittens,thumbprint] [--host H --connect IP --port P --path /x -k] [--case C] [--dump F]`
+- `clientfp-ja4-probe [--ref kittens,thumbprint] [--host H --connect IP --port P --path /x -k] [--case C] [--dump F]`
+  (`tools/clientfp/probe/ja4_probe.py`)
   - Drives 45 cases, using:
     - curl, wget, Python urllib, httpx and niquests;
     - `openssl s_client`;
@@ -363,7 +364,7 @@ work.
     message, as msg_callback delivers it (for QUIC, as recovered from the Initial packets).
   - Each entry has the local `ja4/_r/_o/_ro`, the `server`, and the forms that server confirmed.
   - Use them as offline unit-test vectors for the C parser.
-- `tools/ja4_ossl_harness.c` and `tools/ja4_harness_check.py`
+- `tools/harness/ja4_ossl_harness.c` and `python -m clientfp.probe.ja4_harness_check`
   - A minimal OpenSSL server plus a driver that confirm [§5](#5-getting-the-bytes-out-of-openssl) against the
     in-tree OpenSSL.
 
