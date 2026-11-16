@@ -13,3 +13,7 @@ Every engineering decision, automatic or human (workflow rule h2), gets one file
 | 007 | [Private OPENSSLDIR with shipped openssl.cnf](decision_007.md) | human |
 | 008 | [nginx module set](decision_008.md) | human |
 | 009 | [Source acquisition and version selection](decision_009.md) | automatic |
+| 010 | [.deb assembly with debhelper](decision_010.md) | human |
+| 011 | [JA4 per-connection storage: compact capped lists](decision_011.md) | human |
+| 012 | [HTTP/2 signature overflow: truncate + flag variable](decision_012.md) | human |
+| 013 | [Defaults: capture and header injection enabled](decision_013.md) | human |
