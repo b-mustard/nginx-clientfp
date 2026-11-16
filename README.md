@@ -3,6 +3,8 @@
 Debian/Ubuntu packages of nginx, statically linked with OpenSSL, with client fingerprinting built in:
 
 - **JA4**: TLS ClientHello fingerprint (TLS over TCP and QUIC/HTTP/3), spec in [doc/ja4_sig.md](doc/ja4_sig.md).
+- **TLSFP**: nDPI TLS client fingerprint (JA4 without ephemeral extensions, plus a supported-groups hash), draft
+  [doc/nDPI_TLS_Fingerprint.md](doc/nDPI_TLS_Fingerprint.md), implementation notes in [doc/tlsfp_sig.md](doc/tlsfp_sig.md).
 - **HTTP/2 signature**: Akamai passive HTTP/2 fingerprint, spec in [doc/http2_sig.md](doc/http2_sig.md).
 
 The fingerprints are available as `$clientfp_*` variables and are passed to upstreams as request headers that
@@ -41,7 +43,7 @@ sudo apt install ./dist/ubuntu-24.04/nginx-clientfp_1.31.8+openssl4.0.3-1_amd64.
 
 The package replaces the distro's `nginx`/`nginx-common` and keeps their layout (`sites-available/`,
 `sites-enabled/`, `snippets/`, `modules-enabled/`, user `www-data`, systemd unit, logrotate, man page).
-The packaged `nginx.conf` adds `X-Client-JA4` and `X-Client-HTTP2-FP` to every upstream request.
+The packaged `nginx.conf` adds `X-Client-JA4`, `X-Client-TLSFP` and `X-Client-HTTP2-FP` to every upstream request.
 
 ## Test
 
@@ -59,7 +61,7 @@ See [tests/README.md](tests/README.md).
 doc/            specs, module reference, decision log (doc/ai_dec/)
 packager/       Python build orchestration + debian/ templates + Dockerfile
 patches/        patches/nginx/<line>/*.patch (HTTP/2 hooks); OpenSSL is not patched
-nginx_module/   ngx_http_clientfp_module (nginx glue + pure-C JA4/HTTP2 cores)
+nginx_module/   ngx_http_clientfp_module (nginx glue + pure-C JA4/TLSFP/HTTP2 cores)
 tools/          clientfp Python package: reference implementations and live probes
 tests/          pytest suites, C drivers, fuzz targets, test Dockerfiles
 examples/       echo upstream + nginx site showing the injected headers
