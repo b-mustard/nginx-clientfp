@@ -10,12 +10,15 @@
  *   $clientfp_tlsfp $clientfp_tlsfp_registry
  *   $clientfp_http2 $clientfp_http2_hash $clientfp_http2_overflow
  *
- * JA4: a msg_callback on every server SSL_CTX of http{} captures the first ClientHello of each connection,
- * parses it into compact lists (clientfp_ja4.c) kept in the connection pool, and the strings are formatted on
- * first use. OpenSSL is not patched.
+ * ClientHello capture (decision 030), independent of the TLS library: the patched nginx calls
+ * ngx_http_clientfp_tls_hello() before the TLS handshake of a TCP connection starts (the module peeks at the
+ * socket until the whole ClientHello has arrived) and ngx_http_clientfp_quic_crypto() for every CRYPTO frame of
+ * a QUIC Initial packet. clientfp_hello.c reassembles the message (at most 16 KiB, decision 033). The result lives
+ * in the connection's pool at hc->clientfp (decision 034), so HTTP/1, HTTP/2 and HTTP/3 requests find it.
  *
- * TLSFP (nDPI TLS client fingerprint, doc/tlsfp_sig.md): computed from the same first ClientHello by its own core
- * (clientfp_tlsfp.c), independently of JA4, once per handshake; only the 49-byte string is kept (decision 026).
+ * JA4: the captured ClientHello is parsed into compact lists (clientfp_ja4.c); the strings are formatted on first
+ * use. TLSFP (nDPI TLS client fingerprint, doc/tlsfp_sig.md): computed from the same ClientHello by its own core
+ * (clientfp_tlsfp.c), independently of JA4, once per connection; only the 49-byte string is kept (decision 026).
  *
  * HTTP/2: the patched ngx_http_v2.c calls the ngx_http_clientfp_h2_*() hooks below
  * (patches/nginx/<line>/); without the patch the module builds with JA4 only.
@@ -30,6 +33,7 @@
 #include <ngx_http.h>
 #include <ngx_md5.h>
 
+#include "clientfp_hello.h"
 #include "clientfp_ja4.h"
 #include "clientfp_tlsfp.h"
 
@@ -60,10 +64,17 @@ typedef struct {
 
 
 /*
- * Per TLS connection, in c->pool, attached to the SSL object with ex_data (its presence marks the first
- * ClientHello as seen). JA4 and TLSFP are independent: either may be missing while the other is present.
+ * Per TLS-over-TCP or QUIC connection, in that connection's pool, at hc->clientfp. While the ClientHello arrives
+ * it holds the capture state; once captured is set, the results. JA4 and TLSFP are independent: either may be
+ * missing while the other is present.
  */
 typedef struct {
+    ngx_uint_t                  captured;     /* the capture has finished, with or without a ClientHello */
+    size_t                      need;         /* TCP: bytes to wait for before peeking again */
+    ngx_uint_t                  peeks;        /* TCP: peeks so far */
+    clientfp_hello_quic_t      *quic;         /* QUIC: reassembly buffer until the capture finishes */
+    ngx_pool_t                 *pool;         /* the connection's pool: parsed lists and cached strings */
+
     ngx_int_t                   status;       /* CLIENTFP_OK or an error code */
     clientfp_ja4_t              ja4;
     ngx_str_t                   cache[4];     /* formatted forms, by clientfp_ja4_form_e */
@@ -71,7 +82,7 @@ typedef struct {
     ngx_int_t                   tlsfp_status; /* CLIENTFP_TLSFP_OK or an error code */
     size_t                      tlsfp_len;
     u_char                      tlsfp[CLIENTFP_TLSFP_MAX_LEN];
-} ngx_http_clientfp_ja4_ctx_t;
+} ngx_http_clientfp_tls_ctx_t;
 
 
 #if (NGX_HTTP_CLIENTFP_H2)
@@ -94,9 +105,7 @@ static void *ngx_http_clientfp_create_srv_conf(ngx_conf_t *cf);
 static char *ngx_http_clientfp_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child);
 static char *ngx_http_clientfp_request_header(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
-static void ngx_http_clientfp_msg_callback(int write_p, int version, int content_type, const void *buf,
-    size_t len, SSL *ssl, void *arg);
-static void *ngx_http_clientfp_palloc(void *pool, size_t size);
+static ngx_http_clientfp_tls_ctx_t *ngx_http_clientfp_tls_get(ngx_http_request_t *r);
 static ngx_int_t ngx_http_clientfp_ja4_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v,
     uintptr_t data);
 static ngx_int_t ngx_http_clientfp_tlsfp_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v,
@@ -104,9 +113,6 @@ static ngx_int_t ngx_http_clientfp_tlsfp_variable(ngx_http_request_t *r, ngx_htt
 static ngx_int_t ngx_http_clientfp_h2_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v,
     uintptr_t data);
 static ngx_int_t ngx_http_clientfp_post_read_handler(ngx_http_request_t *r);
-
-
-static int  ngx_http_clientfp_ssl_index = -1;
 
 
 static ngx_command_t  ngx_http_clientfp_commands[] = {
@@ -376,15 +382,10 @@ ngx_http_clientfp_request_header(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 static ngx_int_t
 ngx_http_clientfp_init(ngx_conf_t *cf)
 {
-    ngx_uint_t                      s;
-    ngx_http_handler_pt            *h;
-    ngx_http_ssl_srv_conf_t        *sscf;
-    ngx_http_core_srv_conf_t      **cscfp;
-    ngx_http_core_main_conf_t      *cmcf;
-    ngx_http_clientfp_main_conf_t  *fmcf;
+    ngx_http_handler_pt        *h;
+    ngx_http_core_main_conf_t  *cmcf;
 
     cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);
-    fmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_clientfp_module);
 
     h = ngx_array_push(&cmcf->phases[NGX_HTTP_POST_READ_PHASE].handlers);
     if (h == NULL) {
@@ -393,41 +394,17 @@ ngx_http_clientfp_init(ngx_conf_t *cf)
 
     *h = ngx_http_clientfp_post_read_handler;
 
-    if (!fmcf->enable) {
-        return NGX_OK;
-    }
-
-    if (ngx_http_clientfp_ssl_index == -1) {
-        ngx_http_clientfp_ssl_index = SSL_get_ex_new_index(0, NULL, NULL, NULL, NULL);
-
-        if (ngx_http_clientfp_ssl_index == -1) {
-            ngx_ssl_error(NGX_LOG_EMERG, cf->log, 0, "SSL_get_ex_new_index() failed");
-            return NGX_ERROR;
-        }
-    }
-
-    /*
-     * Every server SSL_CTX gets the callback: SSL_new() copies it from the default server's context of the
-     * listen socket, before SNI selects the final server.
-     */
-
-    cscfp = cmcf->servers.elts;
-
-    for (s = 0; s < cmcf->servers.nelts; s++) {
-        sscf = cscfp[s]->ctx->srv_conf[ngx_http_ssl_module.ctx_index];
-
-        if (sscf == NULL || sscf->ssl.ctx == NULL) {
-            continue;
-        }
-
-        SSL_CTX_set_msg_callback(sscf->ssl.ctx, ngx_http_clientfp_msg_callback);
-    }
-
     return NGX_OK;
 }
 
 
-/* ----------------------------------------------------------------------------------------------- JA4 */
+/* ----------------------------------------------------------------------------------- ClientHello capture */
+
+#if (NGX_HTTP_CLIENTFP_HELLO_HOOKS)
+
+/* TCP: give up after this many peeks of a ClientHello that keeps arriving in small pieces */
+#define NGX_HTTP_CLIENTFP_MAX_PEEKS  64
+
 
 static void *
 ngx_http_clientfp_palloc(void *pool, size_t size)
@@ -450,38 +427,66 @@ ngx_http_clientfp_tmp_free(void *log, void *p)
 }
 
 
-static void
-ngx_http_clientfp_msg_callback(int write_p, int version, int content_type, const void *buf, size_t len,
-    SSL *ssl, void *arg)
+/* NULL when clientfp is off or memory is short: the connection then has no fingerprint. */
+static ngx_http_clientfp_tls_ctx_t *
+ngx_http_clientfp_tls_create(ngx_connection_t *c, ngx_http_connection_t *hc)
 {
-    char                          proto;
-    const u_char                 *p = buf;
-    ngx_connection_t             *c;
-    ngx_http_clientfp_ja4_ctx_t  *ctx;
+    ngx_http_clientfp_tls_ctx_t    *ctx;
+    ngx_http_clientfp_main_conf_t  *fmcf;
 
-    if (write_p || content_type != SSL3_RT_HANDSHAKE || len < 4 || p[0] != SSL3_MT_CLIENT_HELLO) {
-        return;
+    fmcf = hc->conf_ctx->main_conf[ngx_http_clientfp_module.ctx_index];
+
+    if (!fmcf->enable) {
+        return NULL;
     }
 
-    /* only the first ClientHello: not the one after a HelloRetryRequest, nor a renegotiation */
-
-    if (ngx_http_clientfp_ssl_index == -1 || SSL_get_ex_data(ssl, ngx_http_clientfp_ssl_index) != NULL) {
-        return;
-    }
-
-    c = ngx_ssl_get_connection(ssl);
-    if (c == NULL || c->pool == NULL) {
-        return;
-    }
-
-    ctx = ngx_pcalloc(c->pool, sizeof(ngx_http_clientfp_ja4_ctx_t));
+    ctx = ngx_pcalloc(c->pool, sizeof(ngx_http_clientfp_tls_ctx_t));
     if (ctx == NULL) {
+        return NULL;
+    }
+
+    ctx->need = 1;
+    ctx->pool = c->pool;
+    ctx->status = CLIENTFP_EMALFORMED;
+    ctx->tlsfp_status = CLIENTFP_TLSFP_EMALFORMED;
+
+    hc->clientfp = ctx;
+
+    return ctx;
+}
+
+
+/* The capture is over: compute both fingerprints from the ClientHello, or log why there is none. */
+static void
+ngx_http_clientfp_finish(ngx_connection_t *c, ngx_http_clientfp_tls_ctx_t *ctx, int rc, const u_char *msg,
+    size_t len, char proto)
+{
+    ctx->captured = 1;
+
+    switch (rc) {
+
+    case CLIENTFP_HELLO_DONE:
+        break;
+
+    case CLIENTFP_HELLO_TOOBIG:
+        ngx_log_error(NGX_LOG_INFO, c->log, 0,
+                      "clientfp: no JA4/TLSFP for this connection: ClientHello larger than %d bytes",
+                      CLIENTFP_HELLO_MAX);
+        ctx->status = CLIENTFP_ETOOBIG;
+        return;
+
+    case CLIENTFP_HELLO_NOTHELLO:
+        ngx_log_error(NGX_LOG_INFO, c->log, 0,
+                      "clientfp: no JA4/TLSFP for this connection: not a TLS ClientHello");
+        return;
+
+    default: /* CLIENTFP_HELLO_AGAIN: gave up waiting */
+        ngx_log_error(NGX_LOG_INFO, c->log, 0,
+                      "clientfp: no JA4/TLSFP for this connection: incomplete ClientHello");
         return;
     }
 
-    proto = (c->listening && c->listening->quic) ? 'q' : 't';
-
-    ctx->status = clientfp_ja4_parse(&ctx->ja4, p, len, proto, ngx_http_clientfp_palloc, c->pool);
+    ctx->status = clientfp_ja4_parse(&ctx->ja4, msg, len, proto, ngx_http_clientfp_palloc, c->pool);
 
     if (ctx->status != CLIENTFP_OK) {
         ngx_log_error(NGX_LOG_INFO, c->log, 0,
@@ -492,7 +497,7 @@ ngx_http_clientfp_msg_callback(int write_p, int version, int content_type, const
 
     /* TLSFP: its own parse of the same message; uncapped lists, temporary memory released before return */
 
-    ctx->tlsfp_status = clientfp_tlsfp_compute(p, len, proto, ctx->tlsfp, &ctx->tlsfp_len,
+    ctx->tlsfp_status = clientfp_tlsfp_compute(msg, len, proto, ctx->tlsfp, &ctx->tlsfp_len,
                                                ngx_http_clientfp_tmp_alloc, ngx_http_clientfp_tmp_free, c->log);
 
     if (ctx->tlsfp_status != CLIENTFP_TLSFP_OK) {
@@ -500,33 +505,257 @@ ngx_http_clientfp_msg_callback(int write_p, int version, int content_type, const
                       "clientfp: no TLSFP for this connection: %s ClientHello (%uz bytes)",
                       ctx->tlsfp_status == CLIENTFP_TLSFP_ENOMEM ? "out of memory for" : "malformed", len);
     }
+}
 
-    if (SSL_set_ex_data(ssl, ngx_http_clientfp_ssl_index, ctx) == 0) {
-        ngx_ssl_error(NGX_LOG_ALERT, c->log, 0, "SSL_set_ex_data() failed");
+
+/*
+ * TLS over TCP, called by ngx_http_ssl_handshake() before the TLS library reads anything: NGX_AGAIN to wait for
+ * more of the ClientHello, NGX_OK to start the handshake (with or without a fingerprint).
+ *
+ * The socket is peeked, not read, so the TLS library later reads the same bytes. FIONREAD avoids copying until
+ * at least the bytes that clientfp_hello_tls() said it needs are there; a hello that keeps arriving in tiny
+ * pieces is given up after NGX_HTTP_CLIENTFP_MAX_PEEKS peeks, and so is one the client stopped sending
+ * (pending_eof). Waiting needs a new event for each new segment, which only edge-triggered event methods (epoll,
+ * kqueue) deliver; with the others only a hello that has arrived completely is captured.
+ */
+ngx_int_t
+ngx_http_clientfp_tls_hello(ngx_connection_t *c)
+{
+    int                           rc;
+    u_char                       *raw;
+    size_t                        size, msg_len, need;
+    ssize_t                       n;
+    ngx_err_t                     err;
+    ngx_uint_t                    wait;
+    const u_char                 *msg;
+    ngx_http_connection_t        *hc;
+    ngx_http_clientfp_tls_ctx_t  *ctx;
+#if (NGX_HAVE_FIONREAD)
+    int                           avail;
+#endif
+
+    hc = c->data;
+    ctx = hc->clientfp;
+
+    if (ctx == NULL) {
+        ctx = ngx_http_clientfp_tls_create(c, hc);
+        if (ctx == NULL) {
+            return NGX_OK;
+        }
+    }
+
+    if (ctx->captured) {
+        return NGX_OK;
+    }
+
+    wait = (ngx_event_flags & NGX_USE_CLEAR_EVENT) ? 1 : 0;
+    size = CLIENTFP_HELLO_RAW_MAX;
+
+#if (NGX_HAVE_FIONREAD)
+
+    if (ngx_socket_nread(c->fd, &avail) == -1) {
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, ngx_socket_errno, "clientfp: %s failed", ngx_socket_nread_n);
+        ngx_http_clientfp_finish(c, ctx, CLIENTFP_HELLO_AGAIN, NULL, 0, 't');
+        return NGX_OK;
+    }
+
+    if (avail < 0 || (size_t) avail < ctx->need) {
+        if (wait && !c->read->pending_eof) {
+            return NGX_AGAIN;
+        }
+
+        ngx_http_clientfp_finish(c, ctx, CLIENTFP_HELLO_AGAIN, NULL, 0, 't');
+        return NGX_OK;
+    }
+
+    if ((size_t) avail < size) {
+        size = (size_t) avail;
+    }
+
+#endif
+
+    /* the peeked bytes, then CLIENTFP_HELLO_MAX bytes for a ClientHello split across records */
+
+    raw = ngx_alloc(size + CLIENTFP_HELLO_MAX, c->log);
+    if (raw == NULL) {
+        ngx_http_clientfp_finish(c, ctx, CLIENTFP_HELLO_AGAIN, NULL, 0, 't');
+        return NGX_OK;
+    }
+
+    n = recv(c->fd, (char *) raw, size, MSG_PEEK);
+    err = ngx_socket_errno;
+
+    if (n <= 0) {
+        ngx_free(raw);
+
+        if (n == -1 && err == NGX_EAGAIN && wait) {
+            return NGX_AGAIN;
+        }
+
+        /* end of stream or an error: the handshake reports it */
+        ngx_http_clientfp_finish(c, ctx, CLIENTFP_HELLO_AGAIN, NULL, 0, 't');
+        return NGX_OK;
+    }
+
+    msg = NULL;
+    msg_len = 0;
+    need = 0;
+
+    rc = clientfp_hello_tls(raw, (size_t) n, raw + size, &msg, &msg_len, &need);
+
+    if (rc == CLIENTFP_HELLO_AGAIN && wait && !c->read->pending_eof
+        && ++ctx->peeks < NGX_HTTP_CLIENTFP_MAX_PEEKS)
+    {
+        ngx_log_debug3(NGX_LOG_DEBUG_HTTP, c->log, 0, "clientfp: ClientHello incomplete: %z of %uz bytes, peek %ui",
+                       n, need, ctx->peeks);
+        ctx->need = need;
+        ngx_free(raw);
+        return NGX_AGAIN;
+    }
+
+    ngx_http_clientfp_finish(c, ctx, rc, msg, msg_len, 't');
+    ngx_free(raw);
+
+    return NGX_OK;
+}
+
+
+#if (NGX_QUIC)
+
+static void
+ngx_http_clientfp_quic_cleanup(void *data)
+{
+    ngx_http_clientfp_tls_ctx_t  *ctx = data;
+
+    if (ctx->quic) {
+        ngx_free(ctx->quic);
+        ctx->quic = NULL;
     }
 }
 
 
+/*
+ * QUIC, called for each CRYPTO frame of an Initial packet until HTTP/3 initializes its session (c->data is still
+ * the ngx_http_connection_t then). Frames may arrive in any order and overlap; the reassembly buffer is freed when
+ * the capture finishes, or with the connection.
+ */
+void
+ngx_http_clientfp_quic_crypto(ngx_connection_t *c, uint64_t offset, ngx_chain_t *data, size_t len)
+{
+    int                           rc;
+    size_t                        n;
+    ngx_buf_t                    *b;
+    ngx_chain_t                  *cl;
+    ngx_pool_cleanup_t           *cln;
+    ngx_http_connection_t        *hc;
+    ngx_http_clientfp_tls_ctx_t  *ctx;
+
+    hc = c->data;
+    ctx = hc->clientfp;
+
+    if (ctx == NULL) {
+        ctx = ngx_http_clientfp_tls_create(c, hc);
+        if (ctx == NULL) {
+            return;
+        }
+
+        cln = ngx_pool_cleanup_add(c->pool, 0);
+        ctx->quic = ngx_alloc(sizeof(clientfp_hello_quic_t), c->log);
+
+        if (cln == NULL || ctx->quic == NULL) {
+            if (ctx->quic) {
+                ngx_free(ctx->quic);
+                ctx->quic = NULL;
+            }
+
+            ctx->captured = 1;
+            return;
+        }
+
+        cln->handler = ngx_http_clientfp_quic_cleanup;
+        cln->data = ctx;
+
+        clientfp_hello_quic_init(ctx->quic);
+    }
+
+    if (ctx->captured) {
+        return;
+    }
+
+    rc = CLIENTFP_HELLO_AGAIN;
+
+    for (cl = data; cl && len && rc == CLIENTFP_HELLO_AGAIN; cl = cl->next) {
+        b = cl->buf;
+        n = (size_t) (b->last - b->pos);
+
+        if (n > len) {
+            n = len;
+        }
+
+        rc = clientfp_hello_quic_add(ctx->quic, offset, b->pos, n);
+
+        offset += n;
+        len -= n;
+    }
+
+    if (rc == CLIENTFP_HELLO_AGAIN) {
+        return;
+    }
+
+    ngx_http_clientfp_finish(c, ctx, rc, ctx->quic->buf, ctx->quic->total, 'q');
+
+    ngx_free(ctx->quic);
+    ctx->quic = NULL;
+}
+
+#endif /* NGX_QUIC */
+
+#endif /* NGX_HTTP_CLIENTFP_HELLO_HOOKS */
+
+
+/* The connection's capture result, once it is complete. */
+static ngx_http_clientfp_tls_ctx_t *
+ngx_http_clientfp_tls_get(ngx_http_request_t *r)
+{
+#if (NGX_HTTP_CLIENTFP_HELLO_HOOKS)
+    ngx_http_connection_t        *hc;
+    ngx_http_clientfp_tls_ctx_t  *ctx;
+
+#if (NGX_HTTP_V3)
+    if (r->connection->quic) {
+        hc = ngx_http_quic_get_connection(r->connection);
+
+    } else
+#endif
+    {
+        hc = r->http_connection;
+    }
+
+    if (hc == NULL) {
+        return NULL;
+    }
+
+    ctx = hc->clientfp;
+
+    return (ctx != NULL && ctx->captured) ? ctx : NULL;
+#else
+    return NULL;
+#endif
+}
+
+
+/* ----------------------------------------------------------------------------------------------- JA4 */
+
 static ngx_int_t
 ngx_http_clientfp_ja4_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v, uintptr_t data)
 {
-    size_t                          n;
-    u_char                         *p;
-    ngx_str_t                      *s;
-    ngx_connection_t               *c, *tc;
-    ngx_http_clientfp_ja4_ctx_t    *ctx;
-    ngx_http_clientfp_main_conf_t  *fmcf;
+    u_char                       *p;
+    ngx_str_t                    *s;
+    ngx_http_clientfp_tls_ctx_t  *ctx;
 
     v->not_found = 1;
 
-    fmcf = ngx_http_get_module_main_conf(r, ngx_http_clientfp_module);
-    c = r->connection;
-
-    if (!fmcf->enable || c->ssl == NULL || c->ssl->connection == NULL || ngx_http_clientfp_ssl_index == -1) {
-        return NGX_OK;
-    }
-
-    ctx = SSL_get_ex_data(c->ssl->connection, ngx_http_clientfp_ssl_index);
+    ctx = ngx_http_clientfp_tls_get(r);
 
     if (ctx == NULL || ctx->status != CLIENTFP_OK) {
         return NGX_OK;
@@ -536,26 +765,16 @@ ngx_http_clientfp_ja4_variable(ngx_http_request_t *r, ngx_http_variable_value_t 
 
     if (s->data == NULL) {
         /*
-         * Cache in the pool of the connection that owns the SSL object: HTTP/2 and HTTP/3 requests run on
-         * per-stream connections that share it.
+         * Cached in the pool of the TCP or QUIC connection: HTTP/2 and HTTP/3 requests run on per-stream
+         * connections with shorter-lived pools.
          */
-        tc = ngx_ssl_get_connection(c->ssl->connection);
-        if (tc == NULL) {
-            return NGX_OK;
-        }
-
-        p = ngx_pnalloc(tc->pool, clientfp_ja4_max_len(&ctx->ja4, (clientfp_ja4_form_e) data));
+        p = ngx_pnalloc(ctx->pool, clientfp_ja4_max_len(&ctx->ja4, (clientfp_ja4_form_e) data));
         if (p == NULL) {
             return NGX_ERROR;
         }
 
-        n = clientfp_ja4_format(&ctx->ja4, (clientfp_ja4_form_e) data, p);
-        if (n == 0) {
-            return NGX_OK;
-        }
-
+        s->len = clientfp_ja4_format(&ctx->ja4, (clientfp_ja4_form_e) data, p);
         s->data = p;
-        s->len = n;
     }
 
     v->data = s->data;
@@ -571,22 +790,13 @@ ngx_http_clientfp_ja4_variable(ngx_http_request_t *r, ngx_http_variable_value_t 
 static ngx_int_t
 ngx_http_clientfp_tlsfp_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v, uintptr_t data)
 {
-    ngx_connection_t               *c;
-    ngx_http_clientfp_ja4_ctx_t    *ctx;
-    ngx_http_clientfp_main_conf_t  *fmcf;
+    ngx_http_clientfp_tls_ctx_t  *ctx;
 
     static u_char  registry[] = { '0' + CLIENTFP_TLSFP_REGISTRY };
 
     v->not_found = 1;
 
-    fmcf = ngx_http_get_module_main_conf(r, ngx_http_clientfp_module);
-    c = r->connection;
-
-    if (!fmcf->enable || c->ssl == NULL || c->ssl->connection == NULL || ngx_http_clientfp_ssl_index == -1) {
-        return NGX_OK;
-    }
-
-    ctx = SSL_get_ex_data(c->ssl->connection, ngx_http_clientfp_ssl_index);
+    ctx = ngx_http_clientfp_tls_get(r);
 
     if (ctx == NULL || ctx->tlsfp_status != CLIENTFP_TLSFP_OK) {
         return NGX_OK;

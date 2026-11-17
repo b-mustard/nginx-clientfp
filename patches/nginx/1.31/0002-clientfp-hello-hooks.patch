@@ -1,0 +1,111 @@
+diff --git a/src/event/quic/ngx_event_quic.h b/src/event/quic/ngx_event_quic.h
+index e26673a..3ec3625 100644
+--- a/src/event/quic/ngx_event_quic.h
++++ b/src/event/quic/ngx_event_quic.h
+@@ -148,4 +148,13 @@ ngx_uint_t ngx_quic_bpf_enabled(ngx_cycle_t *cycle);
+ #define ngx_quic_bpf_enabled(c)  0
+ #endif
+ 
++#if (NGX_HTTP_CLIENTFP)
++
++/* ClientHello capture from Initial CRYPTO frames, ngx_http_clientfp_module */
++
++void ngx_http_clientfp_quic_crypto(ngx_connection_t *c, uint64_t offset,
++    ngx_chain_t *data, size_t len);
++
++#endif
++
+ #endif /* _NGX_EVENT_QUIC_H_INCLUDED_ */
+diff --git a/src/event/quic/ngx_event_quic_ssl.c b/src/event/quic/ngx_event_quic_ssl.c
+index 259f552..62e63e5 100644
+--- a/src/event/quic/ngx_event_quic_ssl.c
++++ b/src/event/quic/ngx_event_quic_ssl.c
+@@ -675,6 +675,23 @@ ngx_quic_handle_crypto_frame(ngx_connection_t *c, ngx_quic_header_t *pkt,
+         return NGX_OK;
+     }
+ 
++#if (NGX_HTTP_CLIENTFP)
++
++    /*
++     * Until HTTP/3 initializes its session, which happens only after
++     * the ClientHello has been processed, c->data is the
++     * ngx_http_connection_t.
++     */
++
++    if (pkt->level == NGX_QUIC_ENCRYPTION_INITIAL
++        && !qc->streams.initialized)
++    {
++        ngx_http_clientfp_quic_crypto(c, f->offset, frame->data,
++                                      (size_t) f->length);
++    }
++
++#endif
++
+     if (ngx_quic_write_buffer(c, &ctx->crypto, frame->data, f->length,
+                               f->offset)
+         == NGX_CHAIN_ERROR)
+diff --git a/src/http/ngx_http_request.c b/src/http/ngx_http_request.c
+index c8ada1c..29cbb99 100644
+--- a/src/http/ngx_http_request.c
++++ b/src/http/ngx_http_request.c
+@@ -767,6 +767,29 @@ ngx_http_ssl_handshake(ngx_event_t *rev)
+             ngx_log_debug1(NGX_LOG_DEBUG_HTTP, rev->log, 0,
+                            "https ssl handshake: 0x%02Xd", buf[0]);
+ 
++#if (NGX_HTTP_CLIENTFP)
++
++            /* wait until the whole ClientHello can be peeked */
++
++            if (ngx_http_clientfp_tls_hello(c) == NGX_AGAIN) {
++                rev->ready = 0;
++
++                if (!rev->timer_set) {
++                    cscf = ngx_http_get_module_srv_conf(hc->conf_ctx,
++                                                        ngx_http_core_module);
++                    ngx_add_timer(rev, cscf->client_header_timeout);
++                    ngx_reusable_connection(c, 1);
++                }
++
++                if (ngx_handle_read_event(rev, 0) != NGX_OK) {
++                    ngx_http_close_connection(c);
++                }
++
++                return;
++            }
++
++#endif
++
+             clcf = ngx_http_get_module_loc_conf(hc->conf_ctx,
+                                                 ngx_http_core_module);
+ 
+diff --git a/src/http/ngx_http_request.h b/src/http/ngx_http_request.h
+index a204962..3c7f17e 100644
+--- a/src/http/ngx_http_request.h
++++ b/src/http/ngx_http_request.h
+@@ -339,6 +339,10 @@ typedef struct {
+ 
+     unsigned                          ssl:1;
+     unsigned                          proxy_protocol:1;
++#if (NGX_HTTP_CLIENTFP)
++
++    void                             *clientfp;
++#endif
+ } ngx_http_connection_t;
+ 
+ 
+@@ -632,4 +636,15 @@ extern ngx_http_header_out_t   ngx_http_headers_out[];
+     ((ngx_http_log_ctx_t *) log->data)->current_request = r
+ 
+ 
++#if (NGX_HTTP_CLIENTFP)
++
++/* ClientHello capture, ngx_http_clientfp_module */
++
++#define NGX_HTTP_CLIENTFP_HELLO_HOOKS  1
++
++ngx_int_t ngx_http_clientfp_tls_hello(ngx_connection_t *c);
++
++#endif
++
++
+ #endif /* _NGX_HTTP_REQUEST_H_INCLUDED_ */
