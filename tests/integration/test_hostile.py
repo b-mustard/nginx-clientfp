@@ -13,14 +13,16 @@ from __future__ import annotations
 import json
 import random
 import socket
+import ssl
 import struct
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 
 import hpack
 import pytest
 
 from clientfp.fp import h2 as ref_h2
+from clientfp.fp import ja4 as ref_ja4
 from clientfp.probe import h2_probe as hp
 
 from ..conftest import REPO
@@ -351,8 +353,8 @@ def tls_exchange(port: int, data: bytes, timeout: float = 3) -> bytes:
 
 
 def reframe(body: bytes) -> bytes:
-    """A handshake message whose outer length matches the (possibly corrupted) body, so OpenSSL reads all of it and
-    hands it to the msg_callback before validating the inside."""
+    """A handshake message whose outer length matches the (possibly corrupted) body, so the module captures all of it
+    and parses it before the TLS library validates the inside."""
     return b"\x01" + len(body).to_bytes(3, "big") + body
 
 
@@ -376,7 +378,8 @@ def mutate(rng: random.Random, body: bytes) -> bytes:
 
 
 def test_tls_mutated_hellos(srv: Nginx) -> None:
-    """Corrupted ClientHellos with consistent outer framing reach the JA4 parser before OpenSSL's own checks."""
+    """Corrupted ClientHellos with consistent outer framing reach the JA4 and TLSFP parsers before the TLS library's
+    own checks."""
     rng = random.Random(11)
     for v in VECTORS:
         msg = bytes.fromhex(v["client_hello_hex"])
@@ -407,8 +410,8 @@ def test_tls_impossible_input(srv: Nginx, name: str) -> None:
 
 
 def _hello_with(ciphers: int, exts: int, sigalgs: int) -> bytes:
-    """A TLS 1.2 ClientHello OpenSSL accepts (one real suite, the rest unknown values it ignores), with oversized
-    lists for the JA4 caps (decision 011): cipher suites, unknown extensions, signature algorithms."""
+    """A TLS 1.2 ClientHello the TLS library accepts (one real suite, the rest unknown values it ignores), with
+    oversized lists for the JA4 caps (decision 011): cipher suites, unknown extensions, signature algorithms."""
     suites = [0xC02F] + [0x5A00 + i for i in range(ciphers)]
     ext = b""
     ext += struct.pack(">HH", 0x000A, 4) + struct.pack(">HH", 2, 0x0017)               # supported_groups P-256
@@ -427,6 +430,99 @@ def test_tls_oversized_lists_complete_handshake(srv: Nginx, shape: tuple[int, in
     """Lists over the 1024 cap: the hello is valid TLS, so the server must answer with a ServerHello as usual."""
     got = tls_exchange(srv.tls, records(_hello_with(*shape)), timeout=3)
     assert got[:1] == b"\x16" and got[5:6] == b"\x02", got[:16].hex()
+
+
+# ---------------------------------------------------------------------------- ClientHello capture: waiting
+
+def _rec(ctype: int, data: bytes) -> bytes:
+    return bytes([ctype]) + b"\x03\x01" + len(data).to_bytes(2, "big") + data
+
+
+def _split(msg: bytes, size: int) -> list[bytes]:
+    return [_rec(22, msg[i:i + size]) for i in range(0, len(msg), size)]
+
+
+# How the client's first flight is framed into records (decision 030: the module reassembles the hello itself).
+FRAMINGS: dict[str, Callable[[bytes], bytes]] = {
+    "one_record": lambda m: _rec(22, m),
+    "records_of_40": lambda m: b"".join(_split(m, 40)),
+    "records_of_1": lambda m: b"".join(_split(m, 1)),
+    "empty_record_first": lambda m: _rec(22, b"") + _rec(22, m),
+    "32_empty_records_first": lambda m: _rec(22, b"") * 32 + _rec(22, m),
+    "empty_records_between": lambda m: (lambda r: b"".join(x + _rec(22, b"") for x in r[:-1]) + r[-1])(_split(m, 100)),
+}
+
+
+def handshake_in_pieces(port: int, framing: Callable[[bytes], bytes], segment: int, delay: float) -> tuple[str, str]:
+    """A real TLS client (Python's ssl over memory BIOs) whose first flight is re-framed and sent in TCP segments of
+    `segment` bytes, `delay` seconds apart. Returns (JA4 computed locally, JA4 the server reports)."""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    ctx.set_alpn_protocols(["http/1.1"])
+    inc, out = ssl.MemoryBIO(), ssl.MemoryBIO()
+    tls = ctx.wrap_bio(inc, out, server_hostname="localhost")
+    try:
+        tls.do_handshake()
+    except ssl.SSLWantReadError:
+        pass
+    msg = ref_ja4.client_hello_from_records(out.read())
+    assert msg is not None
+    flight = framing(msg)
+
+    def pump() -> None:
+        if out.pending:
+            s.sendall(out.read())
+        data = s.recv(65536)
+        if not data:
+            raise ConnectionError("server closed the connection")
+        inc.write(data)
+
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as s:
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        for i in range(0, len(flight), segment):
+            s.sendall(flight[i:i + segment])
+            time.sleep(delay)
+        while True:
+            try:
+                tls.do_handshake()
+                break
+            except ssl.SSLWantReadError:
+                pump()
+        tls.write(b"GET /fp HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        resp = b""
+        while not resp.endswith(b"}\n"):
+            try:
+                resp += tls.read(65536)
+            except ssl.SSLWantReadError:
+                pump()
+    got = json.loads(resp.split(b"\r\n\r\n", 1)[1])["ja4"]
+    return ref_ja4.from_bytes(msg, "t").ja4, got
+
+
+@pytest.mark.parametrize("framing", list(FRAMINGS))
+@pytest.mark.parametrize("segment,delay", [(1 << 20, 0.0), (50, 0.02), (1, 0.002)], ids=["whole", "50B", "1B"])
+def test_tls_hello_in_pieces(srv: Nginx, framing: str, segment: int, delay: float) -> None:
+    """The handshake succeeds and the JA4 is the client's, however the hello is framed and segmented: the module
+    peeks again as segments arrive, and skips empty records as the TLS library does."""
+    want, got = handshake_in_pieces(srv.tls, FRAMINGS[framing], segment, delay)
+    assert got == want
+
+
+def test_tls_hello_half_sent_then_closed(srv: Nginx) -> None:
+    """A client that stops sending mid-hello and closes its side: the connection is released at once, not after
+    client_header_timeout (the module gives up waiting on pending EOF and the TLS library ends the handshake)."""
+    hello = records(bytes.fromhex(VECTORS[0]["client_hello_hex"]))
+    with socket.create_connection(("127.0.0.1", srv.tls), timeout=10) as s:
+        s.sendall(hello[:200])
+        time.sleep(0.3)
+        s.shutdown(socket.SHUT_WR)
+        t0 = time.monotonic()
+        try:
+            s.recv(100)
+        except (ConnectionResetError, TimeoutError):
+            pass
+        assert time.monotonic() - t0 < 5
 
 
 def test_tls_handshake_flood(srv: Nginx) -> None:

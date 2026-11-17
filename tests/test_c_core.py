@@ -506,7 +506,9 @@ def test_hello_tls_against_reference(drivers: Path) -> None:
         for sizes in ([16384], [1], [2, 3], [4], [5, 500], [len(msg) - 1], [rng.randrange(1, 64) for _ in range(99)]):
             raw = ref_hello.records(msg, sizes, rng.choice((0x0300, 0x0301, 0x0303)))
             raw += rng.choice((b"", _rec(b"\x01", 20), _rec(b"\x00" * 40, 23), b"\x16"))
-            for n in {0, 1, 4, 5, 6, 9, len(raw) // 3, len(raw) - 1, len(raw), *(rng.randrange(len(raw)) for _ in range(4))}:
+            cuts = {0, 1, 4, 5, 6, 9, len(raw) // 3, len(raw) - 1, len(raw),
+                    *(rng.randrange(len(raw)) for _ in range(4))}
+            for n in cuts:
                 cases.append(_tls_case(raw[:n]))
     got = _check_hello(cases)
     assert sum(1 for s, _, _ in got if s == 0) > 600

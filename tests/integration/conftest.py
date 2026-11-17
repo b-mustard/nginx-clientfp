@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 import socket
 import ssl
 import subprocess
@@ -111,7 +112,7 @@ def _cert(dest: Path) -> None:
             .sign(key, hashes.SHA256()))
     (dest / "cert.pem").write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     (dest / "key.pem").write_bytes(key.private_bytes(serialization.Encoding.PEM,
-                                                     serialization.PrivateFormat.TraditionalOpenSSL,
+                                                     serialization.PrivateFormat.PKCS8,
                                                      serialization.NoEncryption()))
 
 
@@ -146,7 +147,9 @@ def _start(image: str, mounts: list[str], script: str, tmp: Path, logs: str) -> 
 
 
 def _deb(target: str, flavor: str) -> Path:
-    debs = sorted((REPO / "dist" / target).glob(f"nginx-clientfp_{flavor}.*+openssl*_amd64.deb"))
+    name = re.compile(rf"nginx-clientfp_{re.escape(flavor)}\.\d+-[0-9][0-9A-Za-z.+~]*_amd64\.deb")   # decision 031
+    debs = sorted(p for p in (REPO / "dist" / target).glob(f"nginx-clientfp_{flavor}.*_amd64.deb")
+                  if name.fullmatch(p.name))
     if not debs:
         pytest.skip(f"no package for flavor {flavor} in dist/{target}/ (run ./build.sh build --target {target})")
     return debs[-1]
