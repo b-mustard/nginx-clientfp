@@ -1,5 +1,6 @@
-"""libFuzzer runs of the module's C cores (t3): tests/fuzz/fuzz_{ja4,h2,tlsfp}.c with ASan + UBSan, seeded with every
-recorded ClientHello and the HTTP/2 probe cases. `--fuzz-seconds` per target (default 60).
+"""libFuzzer runs of the module's C cores (t3): tests/fuzz/fuzz_{ja4,h2,tlsfp,hello}.c with ASan + UBSan, seeded with
+every recorded ClientHello (as a message, as TLS records, as QUIC CRYPTO fragments) and a few HTTP/2 event streams.
+`--fuzz-seconds` per target (default 60).
 
 Any crash, sanitizer report, leak or timeout fails the test; the reproducer is kept in build/fuzz/<target>/."""
 
@@ -26,13 +27,33 @@ def _seed_ja4(corpus: Path) -> None:
         (corpus / f"vector{i:03d}").write_bytes(proto + bytes.fromhex(v["client_hello_hex"]))
 
 
+def _seed_hello(corpus: Path) -> None:
+    from clientfp.fp.hello import records
+
+    for i, v in enumerate(json.loads((REPO / "doc" / "ja4_vectors.json").read_text())):
+        msg = bytes.fromhex(v["client_hello_hex"])
+        (corpus / f"tcp{i:03d}").write_bytes(b"\x00" + records(msg, [100 + 37 * i]))
+        frags = b"".join(o.to_bytes(2, "big") + len(msg[o:o + 500]).to_bytes(2, "big") + msg[o:o + 500]
+                         for o in reversed(range(0, len(msg), 500)))
+        (corpus / f"quic{i:03d}").write_bytes(b"\x01" + frags)
+
+
+# target -> core sources it links
+SOURCES: dict[str, tuple[str, ...]] = {
+    "ja4": ("clientfp_ja4.c", "clientfp_sha256.c"),
+    "h2": ("clientfp_h2.c",),
+    "tlsfp": ("clientfp_tlsfp.c", "clientfp_sha256.c"),
+    "hello": ("clientfp_hello.c", "clientfp_ja4.c", "clientfp_tlsfp.c", "clientfp_sha256.c"),
+}
+
+
 def _seed_h2(corpus: Path) -> None:
     # The event encoding is defined by the target; a few random seeds suffice, libFuzzer finds the structure.
     for i in range(16):
         (corpus / f"seed{i:02d}").write_bytes(bytes((i * 37 + k * 11) & 0xFF for k in range(64 + 32 * i)))
 
 
-@pytest.mark.parametrize("target", ["ja4", "h2", "tlsfp"])
+@pytest.mark.parametrize("target", list(SOURCES))
 def test_fuzz(drivers: Path, target: str, request: pytest.FixtureRequest) -> None:  # noqa: F811
     seconds = int(request.config.getoption("--fuzz-seconds"))
     work = OUT / target
@@ -40,12 +61,13 @@ def test_fuzz(drivers: Path, target: str, request: pytest.FixtureRequest) -> Non
     if work.exists():
         shutil.rmtree(work)
     corpus.mkdir(parents=True)
-    (_seed_h2 if target == "h2" else _seed_ja4)(corpus)
+    {"h2": _seed_h2, "hello": _seed_hello}.get(target, _seed_ja4)(corpus)
     rel = work.relative_to(REPO)
     script = (
         f"set -e; clang -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all "
-        f"-Inginx_module/src -o {rel}/fuzz_{target} tests/fuzz/fuzz_{target}.c nginx_module/src/clientfp_{target}.c "
-        f"-lcrypto; cd {rel}; ./fuzz_{target} -max_total_time={seconds} -max_len=20000 -timeout=10 "
+        f"-Inginx_module/src -o {rel}/fuzz_{target} tests/fuzz/fuzz_{target}.c "
+        f"{' '.join('nginx_module/src/' + s for s in SOURCES[target])}; "
+        f"cd {rel}; ./fuzz_{target} -max_total_time={seconds} -max_len=40000 -timeout=10 "
         f"-print_final_stats=1 corpus"
     )
     proc = subprocess.run(["docker", "run", "--rm", "-v", f"{REPO}:/work", "-w", "/work", IMAGE, "bash", "-c", script],

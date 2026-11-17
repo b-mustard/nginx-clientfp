@@ -1,4 +1,4 @@
-/* libFuzzer target: arbitrary bytes as a sequence of HTTP/2 hook events, then format + hash. */
+/* libFuzzer target: arbitrary bytes as a sequence of HTTP/2 hook events, then format. */
 
 #include <stdlib.h>
 #include <string.h>
@@ -19,7 +19,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     static const char *names[] = { ":method", ":path", ":authority", ":scheme", ":protocol", ":", "x" };
 
     clientfp_h2_t  fp;
-    uint8_t        out[CLIENTFP_H2_MAX_LEN], md5[CLIENTFP_H2_HASH_LEN];
+    uint8_t        out[CLIENTFP_H2_MAX_LEN];
     size_t         i, n;
 
     memset(&fp, 0, sizeof(fp));
@@ -47,6 +47,5 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     if (n > sizeof(out)) {
         abort();
     }
-    (void) clientfp_h2_hash(out, n, md5);
     return 0;
 }

@@ -19,9 +19,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <openssl/evp.h>
 
 #include "clientfp_tlsfp.h"
+#include "clientfp_sha256.h"
 
 
 #define EXT_SNI                 0x0000
@@ -266,34 +266,15 @@ alpn_chars(const rd_t *alpn, char out[2])
 /* ------------------------------------------------------------------------------------- hashing */
 
 typedef struct {
-    EVP_MD_CTX  *md;
-    size_t       n;          /* items written, for the "," separator */
-    size_t       blen;
-    int          failed;
-    char         buf[512];
+    clientfp_sha256_t  sha;
+    size_t             n;          /* items written, for the "," separator */
 } hash_t;
-
-
-static void
-hash_flush(hash_t *h)
-{
-    if (h->blen && !h->failed && EVP_DigestUpdate(h->md, h->buf, h->blen) != 1) {
-        h->failed = 1;
-    }
-
-    h->blen = 0;
-}
 
 
 static void
 hash_put(hash_t *h, const char *p, size_t n)
 {
-    if (h->blen + n > sizeof(h->buf)) {
-        hash_flush(h);
-    }
-
-    memcpy(h->buf + h->blen, p, n);
-    h->blen += n;
+    clientfp_sha256_update(&h->sha, p, n);
 }
 
 
@@ -317,36 +298,27 @@ hash_u16(hash_t *h, unsigned v)
 }
 
 
-static int
-hash_begin(hash_t *h, EVP_MD_CTX *md)
+static void
+hash_begin(hash_t *h)
 {
-    h->md = md;
+    clientfp_sha256_init(&h->sha);
     h->n = 0;
-    h->blen = 0;
-    h->failed = EVP_DigestInit_ex(md, EVP_sha256(), NULL) != 1;
-    return h->failed ? -1 : 0;
 }
 
 
 /* finish and write the first 12 hex digits */
-static int
+static void
 hash_end(hash_t *h, uint8_t *out)
 {
-    unsigned       i, mdlen;
-    unsigned char  md[EVP_MAX_MD_SIZE];
+    unsigned  i;
+    uint8_t   md[CLIENTFP_SHA256_LEN];
 
-    hash_flush(h);
-
-    if (h->failed || EVP_DigestFinal_ex(h->md, md, &mdlen) != 1 || mdlen < 6) {
-        return -1;
-    }
+    clientfp_sha256_final(&h->sha, md);
 
     for (i = 0; i < 6; i++) {
         out[2 * i] = (uint8_t) hexdig[md[i] >> 4];
         out[2 * i + 1] = (uint8_t) hexdig[md[i] & 0x0f];
     }
-
-    return 0;
 }
 
 
@@ -363,7 +335,7 @@ int
 clientfp_tlsfp_compute(const uint8_t *msg, size_t len, char proto, uint8_t *out, size_t *out_len,
     clientfp_tlsfp_alloc_pt alloc, clientfp_tlsfp_free_pt release, void *ctx)
 {
-    int          rc, sni, a_ok, c_state, d_state;
+    int          sni, a_ok, c_state, d_state;
     char         ver[2], alpn[2];
     size_t       body_len, n_c, n_s, n_h, n_g, i, k, o, total;
     unsigned     legacy, n, t, v, ext_len;
@@ -372,7 +344,6 @@ clientfp_tlsfp_compute(const uint8_t *msg, size_t len, char proto, uint8_t *out,
     rd_t         alpn_data, sv_data, sig_data, grp_data;
     rd_t        *alpn_p, *sv_p, *sig_p, *grp_p;
     hash_t       h;
-    EVP_MD_CTX  *md;
 
     *out_len = 0;
 
@@ -540,13 +511,7 @@ clientfp_tlsfp_compute(const uint8_t *msg, size_t len, char proto, uint8_t *out,
 
     /* ---- format */
 
-    rc = CLIENTFP_TLSFP_ECRYPTO;
     o = 0;
-
-    md = EVP_MD_CTX_new();
-    if (md == NULL) {
-        goto done;
-    }
 
     if (a_ok) {
         out[o++] = (uint8_t) proto;
@@ -565,25 +530,19 @@ clientfp_tlsfp_compute(const uint8_t *msg, size_t len, char proto, uint8_t *out,
 
     out[o++] = '_';
 
-    if (hash_begin(&h, md) != 0) {
-        goto done;
-    }
+    hash_begin(&h);
 
     for (i = 0; i < n_c; i++) {
         hash_u16(&h, ciphers[i]);
     }
 
-    if (hash_end(&h, out + o) != 0) {
-        goto done;
-    }
+    hash_end(&h, out + o);
 
     o += 12;
     out[o++] = '_';
 
     if (c_state != FIELD_BAD) {
-        if (hash_begin(&h, md) != 0) {
-            goto done;
-        }
+        hash_begin(&h);
 
         for (i = 0; i < n_h; i++) {
             hash_u16(&h, exts[i]);
@@ -596,9 +555,7 @@ clientfp_tlsfp_compute(const uint8_t *msg, size_t len, char proto, uint8_t *out,
             hash_u16(&h, u16at(sig_list.p + i));
         }
 
-        if (hash_end(&h, out + o) != 0) {
-            goto done;
-        }
+        hash_end(&h, out + o);
 
         o += 12;
     }
@@ -606,17 +563,13 @@ clientfp_tlsfp_compute(const uint8_t *msg, size_t len, char proto, uint8_t *out,
     out[o++] = '_';
 
     if (d_state == FIELD_OK && n_g > 0) {
-        if (hash_begin(&h, md) != 0) {
-            goto done;
-        }
+        hash_begin(&h);
 
         for (i = 0; i < n_g; i++) {
             hash_u16(&h, groups[i]);
         }
 
-        if (hash_end(&h, out + o) != 0) {
-            goto done;
-        }
+        hash_end(&h, out + o);
 
         o += 12;
 
@@ -626,15 +579,10 @@ clientfp_tlsfp_compute(const uint8_t *msg, size_t len, char proto, uint8_t *out,
     }
 
     *out_len = o;
-    rc = CLIENTFP_TLSFP_OK;
-
-done:
-
-    EVP_MD_CTX_free(md);
 
     if (buf != NULL) {
         release(ctx, buf);
     }
 
-    return rc;
+    return CLIENTFP_TLSFP_OK;
 }

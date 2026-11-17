@@ -28,6 +28,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
+#include <ngx_md5.h>
 
 #include "clientfp_ja4.h"
 #include "clientfp_tlsfp.h"
@@ -497,8 +498,7 @@ ngx_http_clientfp_msg_callback(int write_p, int version, int content_type, const
     if (ctx->tlsfp_status != CLIENTFP_TLSFP_OK) {
         ngx_log_error(NGX_LOG_INFO, c->log, 0,
                       "clientfp: no TLSFP for this connection: %s ClientHello (%uz bytes)",
-                      ctx->tlsfp_status == CLIENTFP_TLSFP_EMALFORMED ? "malformed" :
-                      ctx->tlsfp_status == CLIENTFP_TLSFP_ENOMEM ? "out of memory for" : "hash failure on", len);
+                      ctx->tlsfp_status == CLIENTFP_TLSFP_ENOMEM ? "out of memory for" : "malformed", len);
     }
 
     if (SSL_set_ex_data(ssl, ngx_http_clientfp_ssl_index, ctx) == 0) {
@@ -724,8 +724,9 @@ static ngx_int_t
 ngx_http_clientfp_h2_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v, uintptr_t data)
 {
 #if (NGX_HTTP_CLIENTFP_H2)
-    u_char                      *p;
+    u_char                      *p, md[16];
     size_t                       n;
+    ngx_md5_t                    md5;
     ngx_pool_t                  *pool;
     ngx_http_v2_connection_t    *h2c;
     ngx_http_clientfp_h2_ctx_t  *ctx;
@@ -766,17 +767,18 @@ ngx_http_clientfp_h2_variable(ngx_http_request_t *r, ngx_http_variable_value_t *
 
     case NGX_HTTP_CLIENTFP_H2_HASH:
         if (ctx->hash.data == NULL) {
-            p = ngx_pnalloc(pool, CLIENTFP_H2_HASH_LEN);
+            p = ngx_pnalloc(pool, 32);
             if (p == NULL) {
                 return NGX_ERROR;
             }
 
-            if (clientfp_h2_hash(ctx->text.data, ctx->text.len, p) != 0) {
-                return NGX_OK;
-            }
+            ngx_md5_init(&md5);
+            ngx_md5_update(&md5, ctx->text.data, ctx->text.len);
+            ngx_md5_final(md, &md5);
+            ngx_hex_dump(p, md, sizeof(md));
 
             ctx->hash.data = p;
-            ctx->hash.len = CLIENTFP_H2_HASH_LEN;
+            ctx->hash.len = 32;
         }
 
         v->data = ctx->hash.data;

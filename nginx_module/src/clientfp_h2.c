@@ -6,8 +6,6 @@
 
 #include <string.h>
 
-#include <openssl/evp.h>
-
 
 #define FLAG_ACK  0x1
 
@@ -224,23 +222,3 @@ clientfp_h2_format(const clientfp_h2_t *fp, uint8_t *out)
     return (size_t) (p - out);
 }
 
-
-int
-clientfp_h2_hash(const uint8_t *fp, size_t len, uint8_t out[CLIENTFP_H2_HASH_LEN])
-{
-    unsigned int   i, mdlen;
-    unsigned char  md[EVP_MAX_MD_SIZE];
-
-    static const char  hex[] = "0123456789abcdef";
-
-    if (EVP_Digest(fp, len, md, &mdlen, EVP_md5(), NULL) != 1 || mdlen != 16) {
-        return -1;
-    }
-
-    for (i = 0; i < 16; i++) {
-        out[2 * i] = (uint8_t) hex[md[i] >> 4];
-        out[2 * i + 1] = (uint8_t) hex[md[i] & 0xf];
-    }
-
-    return 0;
-}

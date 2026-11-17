@@ -9,7 +9,7 @@
  *   T <sid>                    stream created for HEADERS
  *   H <sid> <name>             pseudo-header name (e.g. :method)
  *   D <sid>                    header block ended
- *   E                          end of connection: print "<frozen>\t<fingerprint>\t<md5>\t<overflow>"
+ *   E                          end of connection: print "<frozen>\t<fingerprint>\t<overflow>"
  */
 
 #include <stdio.h>
@@ -25,7 +25,7 @@ main(void)
     char           line[4096], name[4096];
     unsigned long  a, b, c, d;
     clientfp_h2_t  fp;
-    uint8_t        out[CLIENTFP_H2_MAX_LEN], md5[CLIENTFP_H2_HASH_LEN];
+    uint8_t        out[CLIENTFP_H2_MAX_LEN];
 
     memset(&fp, 0, sizeof(fp));
 
@@ -64,10 +64,7 @@ main(void)
             if (n > sizeof(out)) {
                 abort();
             }
-            if (clientfp_h2_hash(out, n, md5) != 0) {
-                memset(md5, '-', sizeof(md5));
-            }
-            printf("%d\t%.*s\t%.*s\t%d\n", fp.frozen, (int) n, out, (int) sizeof(md5), md5, fp.overflow);
+            printf("%d\t%.*s\t%d\n", fp.frozen, (int) n, out, fp.overflow);
             memset(&fp, 0, sizeof(fp));
             break;
         }

@@ -1,12 +1,15 @@
-"""The nginx module's pure-C cores (nginx_module/src/clientfp_{ja4,h2}.c), built with ASan + UBSan in the
-nginx-clientfp-ctest image and checked against the Python reference implementations (t1, t3):
+"""The nginx module's pure-C cores (nginx_module/src/clientfp_*.c), built with ASan + UBSan in the nginx-clientfp-ctest
+image and checked against the Python reference implementations (t1, t3):
 
 - every captured ClientHello in doc/ja4_vectors.json gives the recorded JA4 in all four forms;
 - differential testing on many mutated hellos: the C parser accepts exactly what the reference accepts and
   formats the same strings; ASan/UBSan abort the driver on any memory error;
 - HTTP/2: hook-event sequences derived from frame sequences give the reference fingerprint;
 - TLSFP: the same hellos, mutated hellos and hellos with corrupted inner lists give the reference's TLSFP (including
-  the fields emptied by spec §9), with no cap on list sizes.
+  the fields emptied by spec §9), with no cap on list sizes;
+- ClientHello capture (decision 030): TLS records split every way, every prefix, hostile record streams and shuffled,
+  overlapping QUIC CRYPTO fragments give the reference's result, and the bytes still needed are a true lower bound;
+- SHA-256: hashlib's digest for every length around the block boundaries, fed in pieces of every size.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from clientfp.fp import hello as ref_hello
 from clientfp.fp import ja4 as ref_ja4
 from clientfp.fp import tlsfp as ref_tlsfp
 from clientfp.fp.tls import Extension, encode_client_hello, parse_client_hello
@@ -43,9 +47,19 @@ def _docker(*cmd: str, stdin: str | None = None) -> str:
     return proc.stdout
 
 
+# driver -> the core sources it links
+DRIVERS: dict[str, tuple[str, ...]] = {
+    "ja4": ("clientfp_ja4.c", "clientfp_sha256.c"),
+    "h2": ("clientfp_h2.c",),
+    "tlsfp": ("clientfp_tlsfp.c", "clientfp_sha256.c"),
+    "hello": ("clientfp_hello.c",),
+    "sha256": ("clientfp_sha256.c",),
+}
+
+
 @pytest.fixture(scope="session")
 def drivers(require_docker: None) -> Path:
-    """Build the image and both drivers once; rebuild only when sources change."""
+    """Build the image and the drivers once; rebuild only when sources change."""
     dockerfile = REPO / "tests" / "docker" / "Dockerfile.ctest"
     subprocess.run(["docker", "build", "-q", "-t", IMAGE, "-f", str(dockerfile), str(dockerfile.parent)],
                    check=True, capture_output=True)
@@ -54,10 +68,10 @@ def drivers(require_docker: None) -> Path:
     digest = hashlib.sha256(b"".join(p.read_bytes() for p in srcs)).hexdigest()
     stamp = OUT / "drivers.sha256"
     if not stamp.exists() or stamp.read_text() != digest:
-        for d in ("ja4", "h2", "tlsfp"):
+        for d, srcs_d in DRIVERS.items():
             _docker("gcc", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined",
                     "-fno-sanitize-recover=all", "-Inginx_module/src", "-o", f"build/ctest/{d}_driver",
-                    f"tests/c/{d}_driver.c", f"nginx_module/src/clientfp_{d}.c", "-lcrypto")
+                    f"tests/c/{d}_driver.c", *(f"nginx_module/src/{s}" for s in srcs_d))
         stamp.write_text(digest)
     return OUT
 
@@ -243,13 +257,15 @@ def nginx_hook_events(stream: bytes) -> list[str]:
 
 
 def run_h2(connections: list[list[str]]) -> list[tuple[int, str, str, int]]:
+    """(frozen, fingerprint, MD5, overflow) per connection. The module hashes with nginx's ngx_md5, outside the core;
+    hashlib stands in for it here."""
     stdin = "".join("\n".join(ev) + "\nE\n" for ev in connections)
     out = _docker("build/ctest/h2_driver", stdin=stdin).splitlines()
     assert len(out) == len(connections)
     res = []
     for line in out:
-        frozen, fp, md5, overflow = line.split("\t")
-        res.append((int(frozen), fp, md5, int(overflow)))
+        frozen, fp, overflow = line.split("\t")
+        res.append((int(frozen), fp, hashlib.md5(fp.encode()).hexdigest(), int(overflow)))
     return res
 
 
@@ -443,3 +459,143 @@ def test_tlsfp_lists_uncapped(drivers: Path) -> None:
     accepted, _ = _check_tlsfp(cases)
     assert accepted == len(cases)
     assert run_tlsfp(cases[:1])[0][1].startswith("t12i9900")
+
+
+# ------------------------------------------------------------------------------------------- ClientHello capture
+
+def run_hello(cases: list[str]) -> list[tuple[int, str, int]]:
+    out = _docker("build/ctest/hello_driver", stdin="".join(c + "\n" for c in cases)).splitlines()
+    assert len(out) == len(cases)
+    res = []
+    for line in out:
+        status, msg, need = line.split("\t")
+        res.append((int(status), msg, int(need)))
+    return res
+
+
+def _tls_case(raw: bytes) -> tuple[str, tuple[int, str, int]]:
+    r = ref_hello.tls_capture(raw)
+    return f"T {raw.hex()}", (ref_hello.STATUS_CODE[r.status], r.msg.hex() if r.status == "done" else "-", r.need)
+
+
+def _quic_case(frags: list[tuple[int, bytes]]) -> tuple[str, tuple[int, str, int]]:
+    q = ref_hello.QuicCapture()
+    for off, data in frags:
+        q.add(off, data)
+    line = "Q " + " ".join(f"{off}:{data.hex()}" for off, data in frags)
+    return line, (ref_hello.STATUS_CODE[q.status], q.msg.hex() if q.status == "done" else "-", 0)
+
+
+def _check_hello(cases: list[tuple[str, tuple[int, str, int]]]) -> list[tuple[int, str, int]]:
+    got = run_hello([c for c, _ in cases])
+    for (line, want), res in zip(cases, got):
+        assert res == want, line[:300]
+    return got
+
+
+def _rec(payload: bytes, ctype: int = 22, version: int = 0x0301) -> bytes:
+    return bytes([ctype]) + version.to_bytes(2, "big") + len(payload).to_bytes(2, "big") + payload
+
+
+def test_hello_tls_against_reference(drivers: Path) -> None:
+    """Every recorded hello, split into records every way, with trailing data, and many prefixes of each."""
+    rng = random.Random(7)
+    cases = []
+    for v in VECTORS:
+        msg = bytes.fromhex(v["client_hello_hex"])
+        for sizes in ([16384], [1], [2, 3], [4], [5, 500], [len(msg) - 1], [rng.randrange(1, 64) for _ in range(99)]):
+            raw = ref_hello.records(msg, sizes, rng.choice((0x0300, 0x0301, 0x0303)))
+            raw += rng.choice((b"", _rec(b"\x01", 20), _rec(b"\x00" * 40, 23), b"\x16"))
+            for n in {0, 1, 4, 5, 6, 9, len(raw) // 3, len(raw) - 1, len(raw), *(rng.randrange(len(raw)) for _ in range(4))}:
+                cases.append(_tls_case(raw[:n]))
+    got = _check_hello(cases)
+    assert sum(1 for s, _, _ in got if s == 0) > 600
+
+
+def test_hello_tls_need_is_a_lower_bound(drivers: Path) -> None:
+    """For every prefix that is incomplete, all longer prefixes short of the reported need stay incomplete, and the
+    full stream completes. Small records make need grow in many small steps."""
+    msgs = [bytes.fromhex(v["client_hello_hex"]) for v in VECTORS[:3]]
+    for msg, sizes in zip(msgs, ([1], [7, 1, 300], [3, 40])):
+        raw = ref_hello.records(msg, sizes)
+        res = _check_hello([_tls_case(raw[:n]) for n in range(len(raw) + 1)])
+        assert res[-1][0] == 0
+        for n, (status, _, need) in enumerate(res):
+            if status == 1:
+                assert all(res[k][0] == 1 for k in range(n, min(need, len(raw) + 1)))
+
+
+def test_hello_tls_hostile(drivers: Path) -> None:
+    rng = random.Random(8)
+    small = bytes.fromhex(VECTORS[0]["client_hello_hex"])
+    big = _hello(list(range(0x0100, 0x0100 + 8150)), [])                   # 16 KiB message, just within the limit
+    assert len(big) <= ref_hello.HELLO_MAX
+    raws = [
+        b"\x17\x03\x03\x00\x05hello", b"\x15\x03\x01\x00\x02\x02\x28", b"\x80\x2e\x01\x00\x02", b"\x16\x02\x00",
+        b"\x16\x03\x01\x00\x00", b"\x16\x03\x01\x40\x01" + bytes(100), b"\x16\x03\x01\xff\xff",
+        _rec(b"\x02\x00\x00\x00"), _rec(b"\x00"), _rec(b"\x0b") + _rec(b"\x00\x00\x00"),         # not a ClientHello
+        _rec(b"\x01\x00\x40\x00" + bytes(100)),                                                  # message > 16 KiB
+        _rec(b"\x01\xff\xff\xff"),
+        ref_hello.records(small, [100])[:120] + _rec(b"\x01", 20) + ref_hello.records(small, [100])[105:],
+        ref_hello.records(small, [1]),                                       # ~6x expansion, still within 32 KiB
+        ref_hello.records(big, [16384]), ref_hello.records(big, [3000]),
+        ref_hello.records(big, [2]),                                         # needs > 32 KiB of records: too big
+        ref_hello.records(small[:4] + bytes(len(small) - 4), [len(small)]),  # completes; parsing is the cores' job
+    ]
+    for _ in range(300):
+        raw = bytearray(ref_hello.records(small, [rng.randrange(1, 400) for _ in range(20)]))
+        for _ in range(rng.randrange(1, 4)):
+            raw[rng.randrange(len(raw))] = rng.randrange(256)
+        raws.append(bytes(raw))
+    for _ in range(300):
+        raws.append(b"\x16\x03" + bytes(rng.randrange(256) for _ in range(rng.randrange(40))))
+    got = _check_hello([_tls_case(r) for r in raws])
+    assert {s for s, _, _ in got} == {0, 1, 2, 3}
+
+
+def test_hello_quic_against_reference(drivers: Path) -> None:
+    """Initial CRYPTO fragments in any order, duplicated, overlapping with conflicting bytes (the first copy wins),
+    beyond the message, and hostile offsets and lengths."""
+    rng = random.Random(9)
+    cases = []
+    for v in VECTORS:
+        msg = bytes.fromhex(v["client_hello_hex"])
+        for _ in range(5):
+            frags, p = [], 0
+            while p < len(msg):
+                n = rng.randrange(1, 700)
+                frags.append((p, msg[p:p + n]))
+                p += n
+            for _ in range(rng.randrange(4)):
+                o = rng.randrange(len(msg))
+                data = msg[o:o + rng.randrange(1, 80)]
+                frags.append((o, bytes(b ^ 0xFF for b in data) if rng.random() < 0.3 else data))
+            frags.append((len(msg) + rng.randrange(50), b"\x01\x00\x00\x09second"))     # after HRR, ignored
+            rng.shuffle(frags)
+            if rng.random() < 0.2:
+                frags = frags[:-1]
+            cases.append(_quic_case(frags))
+    small = bytes.fromhex(VECTORS[0]["client_hello_hex"])
+    cases += [
+        _quic_case([]), _quic_case([(0, b"")]), _quic_case([(0, b"\x01\x00")]), _quic_case([(0, b"\x02\x00\x00\x00")]),
+        _quic_case([(0, b"\x01\x00\x40\x00")]), _quic_case([(1, b"\x00\x40\x00"), (0, b"\x01")]),
+        _quic_case([(2**62, b"\x01"), (ref_hello.HELLO_MAX, b"x" * 100), (ref_hello.HELLO_MAX - 1, b"yz")]),
+        _quic_case([(0, b"\x01\x00\x00\x00")]),
+        _quic_case([(4, small[4:]), (0, small[:4])]),
+        _quic_case([(0, small), (0, b"\x02" + small[1:])]),
+        _quic_case([(i, small[i:i + 1]) for i in reversed(range(len(small)))]),
+    ]
+    got = _check_hello(cases)
+    assert sum(1 for s, _, _ in got if s == 0) > 300
+
+
+def test_sha256(drivers: Path) -> None:
+    rng = random.Random(10)
+    lines, want = [], []
+    for n in [*range(0, 140), 1000, 4095, 4096, 4097, 65536]:
+        data = bytes(rng.randrange(256) for _ in range(n))
+        for chunk in {1, 3, 63, 64, 65, max(n, 1)}:
+            lines.append(f"{chunk}:{data.hex()}")
+            want.append(hashlib.sha256(data).hexdigest())
+    out = _docker("build/ctest/sha256_driver", stdin="".join(f"{x}\n" for x in lines)).splitlines()
+    assert out == want

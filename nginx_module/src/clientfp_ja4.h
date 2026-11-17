@@ -1,8 +1,8 @@
 /*
  * JA4 TLS client fingerprint: ClientHello parser and formatter.
  *
- * Pure C, no nginx dependency, so it can be unit-tested and fuzzed on its own.
- * Hashing uses OpenSSL's EVP API. Normative spec: doc/ja4_sig.md.
+ * Pure C, no nginx or TLS-library dependency, so it can be unit-tested and fuzzed on its own. SHA-256 comes from
+ * clientfp_sha256.c. Normative spec: doc/ja4_sig.md.
  */
 
 #ifndef CLIENTFP_JA4_H
@@ -22,7 +22,6 @@
 #define CLIENTFP_EMALFORMED  1   /* truncated or inconsistent lengths        */
 #define CLIENTFP_ETOOBIG     2   /* a list exceeds CLIENTFP_JA4_MAX_LIST      */
 #define CLIENTFP_ENOMEM      3   /* the allocator returned NULL               */
-#define CLIENTFP_ECRYPTO     4   /* the hash function failed                  */
 
 
 typedef enum {
@@ -49,8 +48,9 @@ typedef void *(*clientfp_alloc_pt)(void *ctx, size_t size);
 
 
 /*
- * Parses a complete ClientHello handshake message (msg_type 0x01, 3-byte length, body), exactly as OpenSSL's
- * msg_callback delivers it. proto is 't' (TLS over TCP) or 'q' (QUIC).
+ * Parses a complete ClientHello handshake message (msg_type 0x01, 3-byte length, body): the TLS records'
+ * payload reassembled, or the start of the QUIC Initial CRYPTO stream (clientfp_hello.h). proto is 't' (TLS over
+ * TCP) or 'q' (QUIC).
  *
  * On success all three lists live in ONE block obtained from alloc(ctx, size) (size may be 0, in which case
  * alloc is not called and the list pointers are NULL). On error nothing was allocated and *ja4 is zeroed.
@@ -62,8 +62,8 @@ int clientfp_ja4_parse(clientfp_ja4_t *ja4, const uint8_t *msg, size_t len, char
 size_t clientfp_ja4_max_len(const clientfp_ja4_t *ja4, clientfp_ja4_form_e form);
 
 /*
- * Writes one form into out (capacity >= clientfp_ja4_max_len()). Returns the length written, or 0 if hashing
- * failed. The output is not NUL-terminated.
+ * Writes one form into out (capacity >= clientfp_ja4_max_len()). Returns the length written (never 0). The output
+ * is not NUL-terminated.
  */
 size_t clientfp_ja4_format(const clientfp_ja4_t *ja4, clientfp_ja4_form_e form, uint8_t *out);
 

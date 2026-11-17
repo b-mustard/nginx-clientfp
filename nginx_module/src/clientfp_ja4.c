@@ -1,7 +1,7 @@
 /*
  * JA4 TLS client fingerprint: ClientHello parser and formatter. See clientfp_ja4.h and doc/ja4_sig.md.
  *
- * Parsing rules (TLS decoding rules, as enforced by OpenSSL and by the reference tools/clientfp/fp/ja4.py):
+ * Parsing rules (the TLS presentation language of RFC 8446 §3, as in the reference tools/clientfp/fp/ja4.py):
  * - Every length must fit its enclosing length and fill it exactly: the handshake message, the body (which ends
  *   with the extensions block, if any), the extensions block, each extension, and the lists inside the three
  *   extensions we decode (ALPN protocol list, signature_algorithms, supported_versions). u16 lists must have an
@@ -11,11 +11,11 @@
  */
 
 #include "clientfp_ja4.h"
+#include "clientfp_sha256.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-#include <openssl/evp.h>
 
 
 #define EXT_SNI                 0x0000
@@ -423,26 +423,10 @@ clientfp_ja4_parse(clientfp_ja4_t *ja4, const uint8_t *msg, size_t len, char pro
 
 /* Output sink: either copies bytes to a buffer or streams them into SHA-256. */
 typedef struct {
-    uint8_t      *out;
-    EVP_MD_CTX   *md;
-    size_t        total;
-    size_t        blen;
-    int           err;
-    uint8_t       buf[256];
+    uint8_t            *out;
+    clientfp_sha256_t  *sha;
+    size_t              total;
 } sink_t;
-
-
-static void
-sink_flush(sink_t *s)
-{
-    if (s->md && s->blen && !s->err) {
-        if (EVP_DigestUpdate(s->md, s->buf, s->blen) != 1) {
-            s->err = 1;
-        }
-    }
-
-    s->blen = 0;
-}
 
 
 static void
@@ -450,28 +434,13 @@ sink_put(sink_t *s, const char *p, size_t n)
 {
     s->total += n;
 
-    if (s->md == NULL) {
-        memcpy(s->out, p, n);
-        s->out += n;
+    if (s->sha) {
+        clientfp_sha256_update(s->sha, p, n);
         return;
     }
 
-    while (n) {
-        size_t  k = sizeof(s->buf) - s->blen;
-
-        if (k > n) {
-            k = n;
-        }
-
-        memcpy(s->buf + s->blen, p, k);
-        s->blen += k;
-        p += k;
-        n -= k;
-
-        if (s->blen == sizeof(s->buf)) {
-            sink_flush(s);
-        }
-    }
+    memcpy(s->out, p, n);
+    s->out += n;
 }
 
 
@@ -515,28 +484,20 @@ sink_c(sink_t *s, const uint16_t *e, size_t ne, const uint16_t *sig, size_t ns)
 }
 
 
-/* hash12 of the string the callback writes: 12 lowercase hex chars, or 000000000000 for an empty string. */
-static int
+/* hash12 of the string the sink receives: 12 lowercase hex chars, or 000000000000 for an empty string. */
+static void
 hash12(uint8_t out[12], const uint16_t *l1, size_t n1, const uint16_t *l2, size_t n2, int is_c)
 {
-    int            rc;
-    size_t         i;
-    sink_t         s;
-    unsigned int   mdlen;
-    unsigned char  md[EVP_MAX_MD_SIZE];
+    size_t             i;
+    sink_t             s;
+    uint8_t            md[CLIENTFP_SHA256_LEN];
+    clientfp_sha256_t  sha;
 
-    memset(&s, 0, offsetof(sink_t, buf));
+    clientfp_sha256_init(&sha);
 
-    s.md = EVP_MD_CTX_new();
-    if (s.md == NULL) {
-        return -1;
-    }
-
-    rc = -1;
-
-    if (EVP_DigestInit_ex(s.md, EVP_sha256(), NULL) != 1) {
-        goto done;
-    }
+    s.out = NULL;
+    s.sha = &sha;
+    s.total = 0;
 
     if (is_c) {
         sink_c(&s, l1, n1, l2, n2);
@@ -545,33 +506,17 @@ hash12(uint8_t out[12], const uint16_t *l1, size_t n1, const uint16_t *l2, size_
         sink_list(&s, l1, n1);
     }
 
-    sink_flush(&s);
-
-    if (s.err) {
-        goto done;
-    }
-
     if (s.total == 0) {
         memset(out, '0', 12);
-        rc = 0;
-        goto done;
+        return;
     }
 
-    if (EVP_DigestFinal_ex(s.md, md, &mdlen) != 1 || mdlen < 6) {
-        goto done;
-    }
+    clientfp_sha256_final(&sha, md);
 
     for (i = 0; i < 6; i++) {
         out[2 * i] = (uint8_t) hexdig[md[i] >> 4];
         out[2 * i + 1] = (uint8_t) hexdig[md[i] & 0xf];
     }
-
-    rc = 0;
-
-done:
-
-    EVP_MD_CTX_free(s.md);
-    return rc;
 }
 
 
@@ -641,21 +586,16 @@ clientfp_ja4_format(const clientfp_ja4_t *ja4, clientfp_ja4_form_e form, uint8_t
     out[10] = '_';
 
     if (form == CLIENTFP_JA4 || form == CLIENTFP_JA4_O) {
-        if (hash12(out + 11, ciphers, ja4->n_ciphers, NULL, 0, 0) != 0) {
-            return 0;
-        }
-
+        hash12(out + 11, ciphers, ja4->n_ciphers, NULL, 0, 0);
         out[23] = '_';
-
-        if (hash12(out + 24, exts, ne, ja4->sigalgs, ja4->n_sigalgs, 1) != 0) {
-            return 0;
-        }
+        hash12(out + 24, exts, ne, ja4->sigalgs, ja4->n_sigalgs, 1);
 
         return CLIENTFP_JA4_HASHED_LEN;
     }
 
-    memset(&s, 0, offsetof(sink_t, buf));
     s.out = out + 11;
+    s.sha = NULL;
+    s.total = 0;
 
     sink_list(&s, ciphers, ja4->n_ciphers);
     sink_put(&s, "_", 1);
