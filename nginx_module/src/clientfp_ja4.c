@@ -166,7 +166,7 @@ alpn_code(rd_t data, char out[2])
 static int
 max_supported_version(rd_t data, unsigned *max)
 {
-    unsigned  list_len, v;
+    unsigned  list_len, v = 0;      /* initialized for gcc -O2 -Wmaybe-uninitialized; rd_u16 always sets it */
     rd_t      list;
 
     *max = 0;

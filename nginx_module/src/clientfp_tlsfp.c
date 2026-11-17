@@ -169,7 +169,7 @@ u16_vector(rd_t data, rd_t *list)
 static int
 version_chars(unsigned legacy, const rd_t *sv, char out[2])
 {
-    unsigned  n, v, best;
+    unsigned  n, v = 0, best;       /* v initialized for gcc -O2 -Wmaybe-uninitialized */
     rd_t      data, list;
 
     best = legacy;
@@ -338,7 +338,7 @@ clientfp_tlsfp_compute(const uint8_t *msg, size_t len, char proto, uint8_t *out,
     int          sni, a_ok, c_state, d_state;
     char         ver[2], alpn[2];
     size_t       body_len, n_c, n_s, n_h, n_g, i, k, o, total;
-    unsigned     legacy, n, t, v, ext_len;
+    unsigned     legacy, n, t, v, ext_len = 0;      /* initialized for gcc -O2 -Wmaybe-uninitialized */
     uint16_t    *buf, *ciphers, *exts, *groups;
     rd_t         r, body, sess, cs, comp, block, ext, sig_list, grp_list;
     rd_t         alpn_data, sv_data, sig_data, grp_data;
