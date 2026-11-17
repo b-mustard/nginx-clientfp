@@ -297,7 +297,7 @@ h2: 3:100;4:10485760;2:0|1048510465|0|m,s,a,p
 
 ---
 
-## 5. Extraction in nginx + OpenSSL
+## 5. Extraction in nginx
 
 ### 5.1 What to capture per connection
 
@@ -337,9 +337,9 @@ Pitfalls:
 - **Cleartext h2c** (prior knowledge, `listen … http2` without TLS) uses the same code path, so the same capture applies.
 - **HTTP/3 / QUIC** is out of scope. The frame model is different.
 
-### 5.3 OpenSSL
+### 5.3 TLS
 
-This signature needs no OpenSSL hooks. All inputs are HTTP/2 frames after TLS decryption. The only TLS dependency is ALPN: HTTP/2 over TLS exists only when the client offers `h2` and nginx selects it (nginx's `SSL_CTX_set_alpn_select_cb` callback, `SSL_get0_alpn_selected`). OpenSSL hooks (ClientHello capture) belong to the JA4 step (`https://kittens.sh/api/ja4`, <https://github.com/FoxIO-LLC/ja4>), not here.
+This signature needs nothing from the TLS layer. All inputs are HTTP/2 frames after TLS decryption. The only TLS dependency is ALPN: HTTP/2 over TLS exists only when the client offers `h2` and nginx selects it. ClientHello capture belongs to the JA4 step (`https://kittens.sh/api/ja4`, <https://github.com/FoxIO-LLC/ja4>; [ja4_sig.md §5](ja4_sig.md#5-capture-in-nginx)), not here.
 
 ---
 

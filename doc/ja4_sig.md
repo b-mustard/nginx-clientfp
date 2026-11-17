@@ -1,7 +1,7 @@
-# JA4 (TLS client) signature — implementation spec for nginx + OpenSSL
+# JA4 (TLS client) signature — implementation spec for nginx
 
 This is a condensed, normative version of [FoxIO's JA4.md](https://github.com/FoxIO-LLC/ja4/blob/16b96d95c220762cf658f67d678cda2aac95c81e/technical_details/JA4.md) (upstream commit `16b96d9`, 2026-09-22),
-written for implementing JA4 inside nginx on top of the in-tree OpenSSL (`openssl/`, 4.2.0-dev).
+written for implementing JA4 inside nginx (`nginx_module/`), independently of the TLS library.
 Every rule below was checked on 2026-09-28 against two independent reference servers:
 
 - `https://kittens.sh/api/ja4`. Its `/api/all` also returns `ja4_r` and the raw ClientHello.
@@ -46,7 +46,7 @@ methods, supported_groups, key_share, ec_point_formats, the SNI *value*, and the
 | 6 | `supported_versions` u16[] | ext `0x002b` | version |
 | 7 | `signature_algorithms` u16[], wire order | ext `0x000d` | tail of `c` |
 
-Wire layout of the handshake message. This is exactly the buffer that OpenSSL's msg_callback delivers ([§5](#5-getting-the-bytes-out-of-openssl)):
+Wire layout of the handshake message. This is exactly the buffer the module's capture produces ([§5](#5-capture-in-nginx)):
 
 ```
 off  size          field
@@ -67,12 +67,12 @@ ext data formats (ClientHello forms):
 ```
 
 Parse defensively. Every length must be bounds-checked against its enclosing length. Truncated or malformed input
-means no fingerprint (OpenSSL will abort such a handshake anyway).
+means no fingerprint (the TLS library aborts such a handshake anyway).
 
 ## 3. Algorithm
 
 **GREASE** (RFC 8701): `v` is GREASE iff `(v & 0x0f0f) == 0x0a0a && (v >> 8) == (v & 0xff)`, which gives the 16 values
-`0x0a0a, 0x1a1a, … 0xfafa`. OpenSSL uses the same test (`ossl_is_grease_value`, `openssl/ssl/ssl_local.h:2975`).
+`0x0a0a, 0x1a1a, … 0xfafa`.
 Remove GREASE values from every list before any use: ciphers, extension types, supported_versions and sigalgs.
 Nothing else is filtered.
 
@@ -97,7 +97,7 @@ without hashing.
    - The rule is literal. If a client lists an unknown value that is higher than `0x0304`, for example draft
      `0x7f1c`, the version is `00`. This was verified: both reference servers returned `t00…`.
    - If `0x002b` contains only GREASE, the spec says nothing. Fall back to `legacy_version`. This case cannot be
-     verified: both reference servers reject such hellos with a `protocol_version` alert, and OpenSSL does the same.
+     verified: both reference servers reject such hellos with a `protocol_version` alert, and so does nginx-clientfp.
      It only matters if JA4 is logged for failed handshakes.
 3. **sni**: `d` if extension type `0x0000` is present (the value is irrelevant), otherwise `i`.
 4. **nc**: the number of non-GREASE cipher suites, as 2 decimal digits, capped at `99`.
@@ -106,7 +106,8 @@ without hashing.
 5. **ne**: the number of non-GREASE extensions, as 2 decimal digits, capped at `99`.
    - SNI (`0x0000`) and ALPN (`0x0010`) are included in the count.
    - Padding (`0x0015`), unknown types and every other type also count.
-   - A repeated extension type counts once per occurrence. OpenSSL accepts duplicates of types it does not recognise.
+   - A repeated extension type counts once per occurrence. TLS libraries accept duplicates of types they do not
+     recognise (nginx-clientfp does).
      Verified against thumbprint.me: two copies of `1234` gave `ne = 17` and appear twice in `c`.
 6. **alpn**: let `v` = the bytes of the first protocol name in ext `0x0010`.
    - It is the first value the client *offers*, not the protocol that is negotiated. httpx with `http2=True` offers
@@ -182,126 +183,66 @@ JA4_o = t13d1516h2_acb858a92679_18f69afefd3d
   `t13d4715…_3a32f3cec0e4`): both reference servers reported the first hello's JA4. The upstream Rust implementation
   also uses the first hello.
 - Renegotiation hellos (TLS ≤ 1.2) are not the connection's fingerprint either.
-- SSLv2-format hellos (`s2`) cannot occur. OpenSSL 4.x removed SSLv2 ClientHello support, and
-  `SSL_client_hello_isv2()` always returns 0.
-- ECH: if the server has ECH keys and decryption succeeds, OpenSSL's ClientHello callback sees the *inner* hello (see
-  the man page). JA4 is defined on the hello as seen on the wire (the outer hello). The msg_callback path below
-  sees only the outer hello: the inner one is decrypted and swapped in later, inside `tls_process_client_hello`
-  (`statem_srvr.c:1891–1899`), with no msg_callback. This is from reading the code; ECH was not configured or tested.
+- SSLv2-format (backwards-compatible) ClientHellos: no fingerprint is defined for them, and nginx-clientfp computes
+  none. By default it refuses such connections before the handshake (`clientfp_refuse_sslv2_hello`, decision 036).
+  The TLS library would otherwise accept them only at security level 0 with RSA key exchange ciphers.
+- ECH: JA4 is defined on the hello as seen on the wire (the outer hello). The capture in [§5](#5-capture-in-nginx)
+  reads the bytes before the TLS library does, so it sees only the outer hello. ECH was not configured or tested.
 
-## 5. Getting the bytes out of OpenSSL
+## 5. Capture in nginx
 
-### 5.1 Do NOT build the extension list from the `SSL_client_hello_*` API
+### 5.1 Why the raw bytes
 
-`SSL_client_hello_get1_extensions_present()` and `SSL_client_hello_get_extension_order()` return **only extensions
-that OpenSSL recognises**. `SSL_client_hello_get0_ext()` also finds only those. Unknown types, including GREASE, are
-silently dropped:
-
-- `openssl/ssl/statem/extensions.c:739`: "Unknown extension. We allow it" (`*found = NULL`).
-- `openssl/ssl/statem/extensions.c:959`: `if (thisex == NULL) continue;`. Unknown extensions are never stored.
-- The man page states this too: `openssl/doc/man3/SSL_CTX_set_client_hello_cb.pod:72`.
-
-Recognised types in the default 4.2 build (`ext_defs[]`, `extensions.c:186`):
-
-```
-ff01 0000 0001 000c(srp) 000b 000a 0023 0005(ocsp) 3374(npn) 0010 000e(srtp) 0016 0012(ct) 0017 0032 0031 0013
-0014 000d 002b 002d 0033 002c fde8 001b 002a 002f fe0d(ech) fd00(ech) 0029
-```
-
-Types marked with a build flag disappear under `no-srp`, `no-ocsp`, `no-nextprotoneg`, `no-srtp`, `no-ct` or
-`no-ech`. Custom extensions registered with `SSL_CTX_add_custom_ext` also become visible; for QUIC that includes
-`0x0039`. **The API view therefore depends on the build.** Common types it does *not* see:
+JA4 needs every extension type exactly as sent, including unknown types and GREASE. A TLS library's view of the
+ClientHello does not give that: APIs that list the extensions of a ClientHello typically report only the types the
+library implements, and silently drop the rest. Common types that are lost that way:
 
 - `0015` padding;
 - `001c` record_size_limit;
 - `0022` delegated_credentials;
 - `4469` and `44cd` ALPS;
 - `000f` heartbeat;
-- `0009`;
 - `0039` quic_transport_parameters on TCP;
 - every GREASE value.
 
-Impact on real clients, measured with `SSL_client_hello_get1_extensions_present()` semantics:
+Measured impact on real clients when only implemented types are kept:
 
-| client | JA4 from wire bytes (correct) | JA4 from API ext list | lost |
-|--------|-------------------------------|-----------------------|------|
+| client | JA4 from wire bytes (correct) | JA4 from implemented types only | lost |
+|--------|-------------------------------|---------------------------------|------|
 | Chrome (curl_cffi) | `t13d1516h2_8daaf6152771_806a8c22fdea` | `t13d1515h2_…_e4c2b8c727f2` | `44cd` |
 | Firefox (curl_cffi) | `t13d1717h2_5b57614c22b0_3cbfd9057e0d` | `t13d1715h2_…_c1eccb039341` | `001c`, `0022` |
-| curl 8.5 / OpenSSL 3.0 | `t13d3112h2_e8f1e7e78f70_b26ce05bbdd6` | `t13d3111h2_…_375ca2c5e164` | `0015` |
+| curl 8.5 | `t13d3112h2_e8f1e7e78f70_b26ce05bbdd6` | `t13d3111h2_…_375ca2c5e164` | `0015` |
 | Safari (curl_cffi) | `t13d2013h2_a09f3c656075_7f0f34a4126d` | same | none |
 
-QUIC hellos have the same problem. niquests/qh3 over HTTP/3 sends `44cd` (ALPS), which the API never reports.
+QUIC hellos have the same problem. niquests/qh3 over HTTP/3 sends `44cd` (ALPS).
 
-### 5.2 Recommended: capture the raw ClientHello with the msg_callback and parse it yourself
+### 5.2 The module reassembles the ClientHello itself (decision 030)
 
-```c
-static void ja4_msg_cb(int write_p, int version, int content_type,
-                       const void *buf, size_t len, SSL *ssl, void *arg)
-{
-    const u_char *p = buf;
-    if (write_p || content_type != SSL3_RT_HANDSHAKE /*22*/ || len < 4 || p[0] != SSL3_MT_CLIENT_HELLO /*1*/)
-        return;
-    /* first ClientHello only (a 2nd one follows a HelloRetryRequest): copy buf[0..len) into per-connection
-       storage if nothing is stored yet. buf is only valid during the call. */
-}
-SSL_CTX_set_msg_callback(ctx, ja4_msg_cb);   /* or SSL_set_msg_callback(ssl, ...) per connection */
-```
+The module never asks the TLS library for the hello. Two small hooks in nginx (`patches/nginx/<line>/0002-*`) give
+it the client's bytes before the TLS library reads them, and `nginx_module/src/clientfp_hello.c` reassembles the
+handshake message (the layout of [§2](#2-values-to-extract-from-the-clienthello)):
 
-- `buf` is the complete handshake message: the 4-byte header plus the body, reassembled across TLS records. That is
-  the layout in [§2](#2-values-to-extract-from-the-clienthello). It is called from `tls_get_message_body()`
-  (`openssl/ssl/statem/statem_lib.c:1776`) **before** the ClientHello is parsed
-  (`statem_srvr.c:2021 tls_collect_extensions`) and **before** the client_hello callback
-  (`statem_srvr.c:2091`). So it also works for hellos that OpenSSL then rejects.
-- `SSL_new()` copies the SSL_CTX's msg_callback into the SSL (`openssl/ssl/ssl_lib.c:858`). In nginx the connection's
-  SSL is created from the **default server's** SSL_CTX for that listen socket, before SNI switches the context.
-  Install the callback on every server SSL_CTX, or per connection with `SSL_set_msg_callback()` before the handshake
-  starts.
-- Only **one** msg_callback exists per SSL, and it is a setter, not a chain. Check that nginx does not install its
-  own; if it does, call through to it. The nginx QUIC OpenSSL-compat layer is a suspect. The nginx source is not in
-  this tree yet, so this is **unverified**.
-- To reach the nginx connection: `ngx_ssl_get_connection(ssl)` (ex_data), then store the copy in `c->pool`. Compute
-  JA4 lazily when the variable is first evaluated. The hello is typically 0.5–2 KB; post-quantum key shares make it
-  larger.
-- The `SSL_client_hello_*` getters are still usable **as a cross-check** inside a client_hello callback:
-  - `SSL_client_hello_get0_ciphers()` returns the raw cipher bytes, GREASE included (`ssl_lib.c:7246`).
-  - `SSL_client_hello_get0_legacy_version()`.
-  - `SSL_client_hello_get0_ext()` works for `0x0000`, `0x0010`, `0x000d` and `0x002b`. These are recognised in
-    every build.
+- **TLS over TCP.** `ngx_http_ssl_handshake()` calls `ngx_http_clientfp_tls_hello()` before it creates the TLS
+  connection. The module peeks at the socket (`MSG_PEEK`), so the TLS library later reads the same bytes, and walks
+  the handshake records (content type 22, version major 3, length 0–16384; empty records are skipped, as the TLS
+  library skips them). A ClientHello split over several records is joined. While it is incomplete the module
+  returns `NGX_AGAIN` and nginx waits for more data, under `client_header_timeout`. The capture computes a lower
+  bound on the bytes still needed, and `FIONREAD` avoids copying again before they are there. It gives up after
+  64 peeks or when the client closes its side; the handshake then goes on without a fingerprint.
+- **QUIC.** `ngx_quic_handle_crypto_frame()` calls `ngx_http_clientfp_quic_crypto()` for every CRYPTO frame of an
+  Initial packet, until HTTP/3 has started its session. Frames may arrive in any order and overlap (Chrome
+  shuffles them); the first copy of each byte wins.
+- **Limits** (decision 033): the ClientHello may be at most 16 KiB, carried in at most 32 KiB of TLS records.
+- **Which hello.** Only the first ClientHello of the connection is captured ([§4](#4-which-clienthello)): the
+  TCP hook runs once before the handshake, and the QUIC hook stops when the first hello is complete.
+- **Where the result lives.** In the connection's `ngx_http_connection_t` (decision 034), so HTTP/1.x, HTTP/2 and
+  HTTP/3 requests find it. JA4 is parsed into compact lists once; the four strings are formatted on first use.
+- **Hashes.** SHA-256 is the module's own (`clientfp_sha256.c`); no TLS library function is called.
 
-  The **extension type list must come from raw bytes.** Once you have the raw bytes, parse everything from them so
-  there is one source of truth.
-
-### 5.3 Harness results (in-tree OpenSSL 4.2.0-dev)
-
-`tools/harness/ja4_ossl_harness.c` is a TLS server using `SSL_CTX_set_msg_callback`, `SSL_CTX_set_client_hello_cb` and
-the `SSL_client_hello_*` getters. It uses an RSA certificate at security level 0, so that it also completes hellos the
-reference servers refuse. It ran against 22 clients from the probe, and all 22 passed:
-
-- curl, wget, Python urllib, httpx and niquests;
-- s_client, Chrome, Firefox and Safari;
-- the tlslite GREASE, unknown-extension, duplicate-extension, 100-cipher, HRR and fragmented cases, and a non-ASCII
-  ALPN;
-- TLS 1.2 without sigalgs (full and resumed) and TLS 1.2 without any extension.
-
-| check | result |
-|---|---|
-| msg_callback bytes == ClientHello bytes captured on the wire | yes, in every case, including a hello split over **9 TLS records** |
-| msg_callback fires before the client_hello callback | yes |
-| `SSL_client_hello_get0_ciphers()` == raw wire cipher list, GREASE included | yes |
-| `get1_extensions_present()` == `get_extension_order()` == wire list minus unknown types, order kept | yes |
-| `get0_ext()` for a type that is on the wire but unknown (`0015`, `44cd`, `4469`, `0a0a`) | returns 0 (not found) |
-| JA4 computed from the msg_callback bytes == server-confirmed JA4 | yes |
-| forced HelloRetryRequest: callback invocations | msg_callback **2**, client_hello callback **2**. Keep the first capture only |
-| TLS 1.2 hello without `signature_algorithms` | captured exactly: `t12d4311h1_12709fe4c724_7fcc4c631e9d` (`c_raw` has no `_`) |
-| TLS 1.2 hello with no extensions block | captured exactly: `t12i430000_12709fe4c724_000000000000` |
-
-Reproduce:
-
-```
-Configure --prefix=... no-docs no-tests shared && make build_libs     # out-of-tree build of openssl/
-cc -o ja4_ossl_harness tools/harness/ja4_ossl_harness.c -I$B/include -Iopenssl/include -L$B -lssl -lcrypto
-.venv/bin/python -m clientfp.probe.ja4_harness_check --harness ./ja4_ossl_harness --lib $B
-```
+`tools/clientfp/fp/hello.py` is the reference for the reassembly. `tests/test_c_core.py` checks the C code against it
+on every recorded hello split into records every way, thousands of prefixes, hostile record streams and shuffled,
+overlapping QUIC fragments. `tests/integration/test_hostile.py` checks real handshakes whose hello is framed and
+segmented in many ways against a running nginx.
 
 ## 6. Values the nginx side should expose
 
@@ -345,9 +286,8 @@ also serves the HTTP/2 work.
   - `--selftest` checks every worked example and ALPN example in the spec, including `JA4_o`.
 - `clientfp-ja4-probe [--ref kittens,thumbprint] [--host H --connect IP --port P --path /x -k] [--case C] [--dump F]`
   (`tools/clientfp/probe/ja4_probe.py`)
-  - Drives 46 cases, using:
+  - Drives 41 cases, using:
     - curl, wget, Python urllib, httpx and niquests;
-    - `openssl s_client`;
     - curl_cffi (Chrome, Firefox and Safari over TCP; Chrome over HTTP/3);
     - niquests/qh3 over HTTP/3;
     - a tlslite-ng client whose ClientHello is mutated on the fly.
@@ -361,12 +301,9 @@ also serves the HTTP/2 work.
   - Point it at nginx with `--host localhost --connect 127.0.0.1 --port 8443 --path /ja4 -k`.
 - `doc/ja4_vectors.json`
   - 81 captured ClientHellos: 39 confirmed by kittens.sh and 42 by thumbprint.me. Each is stored as the hex handshake
-    message, as msg_callback delivers it (for QUIC, as recovered from the Initial packets).
+    message, as the module's capture reassembles it (for QUIC, as recovered from the Initial packets).
   - Each entry has the local `ja4/_r/_o/_ro`, the `server`, and the forms that server confirmed.
   - Use them as offline unit-test vectors for the C parser.
-- `tools/harness/ja4_ossl_harness.c` and `python -m clientfp.probe.ja4_harness_check`
-  - A minimal OpenSSL server plus a driver that confirm [§5](#5-getting-the-bytes-out-of-openssl) against the
-    in-tree OpenSSL.
 
 Live results: 81 completed handshakes, 0 mismatches.
 
@@ -374,11 +311,11 @@ Common tools. All four forms were confirmed by thumbprint.me, and `ja4`/`ja4_r` 
 
 | client | JA4 | note |
 |---|---|---|
-| curl 8.5.0 / OpenSSL 3.0.13 (default, h2) | `t13d3112h2_e8f1e7e78f70_b26ce05bbdd6` | niquests (default) gives the same value |
+| curl 8.5.0 (default, h2) | `t13d3112h2_e8f1e7e78f70_b26ce05bbdd6` | niquests (default) gives the same value |
 | curl `--tlsv1.3` | `t13d0412h2_16476d049b0b_85302d7e289e` | TLS 1.3 suites only |
 | curl `--no-alpn` | `t13d311100_e8f1e7e78f70_b26ce05bbdd6` | `00` |
 | curl `https://<ip>/` (no SNI) | `t13i3111h1_e8f1e7e78f70_b26ce05bbdd6` | `i` |
-| wget 1.21.4 (OpenSSL) | `t13d751100_479067518aa3_fb8d5ffd48c1` | no ALPN, 75 ciphers |
+| wget 1.21.4 | `t13d751100_479067518aa3_fb8d5ffd48c1` | no ALPN, 75 ciphers |
 | Python 3.12 urllib | `t13d3113h1_e8f1e7e78f70_d339722ba4af` | curl's extension set plus `0023` session_ticket |
 | httpx 0.28 (h1, or `http2=True`) | `t13d3112h1_e8f1e7e78f70_d41ae481755e` | has `0023` but no `0031`; offers `http/1.1,h2`, so `h1` even when h2 is negotiated |
 | curl_cffi Chrome over HTTP/3 | `q13d0308h3_55b375c5d22e_1b7ced03430d` | QUIC |
@@ -390,12 +327,7 @@ Edge cases (the same values from both servers unless noted):
 |---|---|---|
 | curl default / `--http1.1` | `t13d3112h2_e8f1e7e78f70_b26ce05bbdd6` / `…h1…` | baseline, `h2`/`h1` |
 | curl `--tls-max 1.2` | `t12d2807h1_d943125447b4_a44c6288192a` | no `0x002b` → legacy_version |
-| s_client, no ALPN | `t13d311000_e8f1e7e78f70_1f22a2ca17c4` | `00` |
-| s_client `-noservername` | `t13i3110h1_…` | `i` |
-| s_client `-sigalgs` reordered | `t13d3111h1_e8f1e7e78f70_1c3224909982` | sigalgs in wire order |
-| s_client `-serverinfo 2570,17513,4660` | `t13d3113h1_…_bd4adf9e40a2` | GREASE ext ignored, unknown exts counted |
-| s_client ALPN `\xab\xcd` | `t13d3111ad_…` | hex ALPN rule |
-| Chrome / Firefox / Safari | see [§5.1](#51-do-not-build-the-extension-list-from-the-ssl_client_hello_-api) | GREASE, ALPS, ECH-GREASE, shuffled extensions |
+| Chrome / Firefox / Safari | see [§5.1](#51-why-the-raw-bytes) | GREASE, ALPS, ECH-GREASE, shuffled extensions |
 | tlslite + GREASE in ciphers, exts, sigalgs, versions, groups | `t13d4715h1_ace53f506114_3a32f3cec0e4` | identical to the no-GREASE hello |
 | tlslite, extensions reversed | same as above | `c` is order-independent |
 | tlslite, sigalgs reversed | `…_9b711b71942c` | `c` depends on sigalg order |
@@ -412,8 +344,9 @@ pinned in `pyproject.toml` (0.8.2) sends one more extension, so the same cases n
 checks every case against nginx-clientfp itself, using the reference calculator on the captured bytes. It does not
 rely on these recorded strings.
 
-Not verifiable against either reference server. Both refuse these hellos, so the rules come from the spec alone. The
-OpenSSL harness confirms that the bytes are captured exactly ([§5.3](#53-harness-results-in-tree-openssl-420-dev)).
+Not verifiable against either reference server. Both refuse these hellos, so the rules come from the spec alone.
+nginx-clientfp completes them at security level 0, and `tests/integration/test_fingerprints.py` checks that the
+bytes are captured exactly.
 
 - TLS 1.2 without `signature_algorithms`:
   - Both servers answer `handshake_failure`. With no sigalgs, the server would have to sign with SHA-1.

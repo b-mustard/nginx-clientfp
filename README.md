@@ -1,6 +1,7 @@
 # nginx-clientfp
 
-Debian/Ubuntu packages of nginx, statically linked with OpenSSL, with client fingerprinting built in:
+Debian/Ubuntu packages of nginx, built against the distribution's own TLS library (libssl), with client
+fingerprinting built in:
 
 - **JA4**: TLS ClientHello fingerprint (TLS over TCP and QUIC/HTTP/3), spec in [doc/ja4_sig.md](doc/ja4_sig.md).
 - **TLSFP**: nDPI TLS client fingerprint (JA4 without ephemeral extensions, plus a supported-groups hash), draft
@@ -10,13 +11,18 @@ Debian/Ubuntu packages of nginx, statically linked with OpenSSL, with client fin
 The fingerprints are available as `$clientfp_*` variables and are passed to upstreams as request headers that
 clients cannot spoof. Module reference: [doc/clientfp_module.md](doc/clientfp_module.md).
 
-| Flavor | nginx | OpenSSL (static) | Package |
-|---|---|---|---|
-| `1.31` | newest 1.31.x | newest 4.0.x | `nginx-clientfp_1.31.x+openssl4.0.x-<rev>_amd64.deb` |
-| `1.30` | newest 1.30.x | newest 3.5.x | `nginx-clientfp_1.30.x+openssl3.5.x-<rev>_amd64.deb` |
+| Flavor | nginx | Package |
+|---|---|---|
+| `1.31` | newest 1.31.x | `nginx-clientfp_1.31.x-<rev>_amd64.deb` |
+| `1.30` | newest 1.30.x | `nginx-clientfp_1.30.x-<rev>_amd64.deb` |
 
 Targets: this distro (native build), and in docker `ubuntu-24.04`, `ubuntu-26.04`, `debian-12`, `debian-13`.
 Output goes to `dist/<distro>-<version>/`.
+
+The module reads the ClientHello itself, before the TLS library does (TCP: from the socket; QUIC: from the Initial
+CRYPTO frames), so fingerprints do not depend on the TLS library or its version. HTTP/3 works on every target; where
+the distribution's libssl has no QUIC API (Ubuntu 24.04, Debian 12), nginx uses its QUIC compatibility layer, which
+has no 0-RTT.
 
 ## Build
 
@@ -29,16 +35,16 @@ Output goes to `dist/<distro>-<version>/`.
 
 `build.sh` creates `.venv`, then runs `python -m packager`. Every build checks upstream for the newest release
 of each series, clones or updates `extern_src/`, exports the tags into `build/`, applies `patches/`, builds with
-`dpkg-buildpackage`, and verifies the result: OpenSSL must be linked statically and none of its symbols may be
-exported from `/usr/sbin/nginx`.
+`dpkg-buildpackage`, and verifies the result: `/usr/sbin/nginx` must link the distribution's libssl and contain the
+module and every patched hook.
 
-Native build dependencies: `build-essential debhelper dpkg-dev fakeroot lintian libpcre2-dev zlib1g-dev git`.
+Native build dependencies: `build-essential debhelper dpkg-dev fakeroot lintian libpcre2-dev libssl-dev zlib1g-dev git`.
 Docker builds need only docker (rootless works).
 
 ## Install
 
 ```sh
-sudo apt install ./dist/ubuntu-24.04/nginx-clientfp_1.31.8+openssl4.0.3-1_amd64.deb
+sudo apt install ./dist/ubuntu-24.04/nginx-clientfp_1.31.8-1_amd64.deb
 ```
 
 The package replaces the distro's `nginx`/`nginx-common` and keeps their layout (`sites-available/`,
@@ -60,8 +66,8 @@ See [tests/README.md](tests/README.md).
 ```
 doc/            specs, module reference, decision log (doc/ai_dec/)
 packager/       Python build orchestration + debian/ templates + Dockerfile
-patches/        patches/nginx/<line>/*.patch (HTTP/2 hooks); OpenSSL is not patched
-nginx_module/   ngx_http_clientfp_module (nginx glue + pure-C JA4/TLSFP/HTTP2 cores)
+patches/        patches/nginx/<line>/*.patch (HTTP/2 hooks, ClientHello capture hooks)
+nginx_module/   ngx_http_clientfp_module (nginx glue + pure-C capture/JA4/TLSFP/HTTP2/SHA-256 cores)
 tools/          clientfp Python package: reference implementations and live probes
 tests/          pytest suites, C drivers, fuzz targets, test Dockerfiles
 examples/       echo upstream + nginx site showing the injected headers

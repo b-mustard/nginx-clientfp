@@ -27,8 +27,9 @@ t13d1514h2_8daaf6152771_aabe8f104b71_646c356617d7   (Chrome; JA4 t13d1516h2_8daa
 
 ## 2. Algorithm as implemented
 
-1. **Input.** The first ClientHello of the connection, as the handshake message OpenSSL's `msg_callback`
-   delivers (§4, §7.1). The ClientHello after a HelloRetryRequest is ignored.
+1. **Input.** The first ClientHello of the connection, as the handshake message the module's capture
+   reassembles before the TLS library reads it (§4, §7.1; [ja4_sig.md §5](ja4_sig.md#5-capture-in-nginx)). The
+   ClientHello after a HelloRetryRequest is ignored.
 2. **GREASE** (§6.2). RFC 8701 values, where both octets are equal and the low nibble is `A` (`0a0a`, `1a1a` …
    `fafa`), are removed from cipher suites, extension types and supported groups. Signature algorithms are not
    filtered, because §6.2 does not list them.
@@ -65,9 +66,9 @@ t13d1514h2_8daaf6152771_aabe8f104b71_646c356617d7   (Chrome; JA4 t13d1516h2_8daa
      Examples: `_8daaf6152771_aabe8f104b71_646c356617d7`, `t13d1514h2_8daaf6152771_aabe8f104b71_`.
    - Malformed means the extension does not decode exactly under the TLS presentation language (RFC 8446 §3):
      each length must fit its enclosing length and fill it exactly, and u16 lists must have an even length.
-   - OpenSSL validates these extensions as well and usually aborts such a handshake, so a partial TLSFP
-     rarely reaches a request. The rule keeps the C core well-defined on any input; the TLSFP is computed in the
-     callback before OpenSSL looks at the extensions.
+   - The TLS library validates these extensions as well and usually aborts such a handshake, so a partial TLSFP
+     rarely reaches a request. The rule keeps the C core well-defined on any input; the TLSFP is computed from
+     the captured hello before the TLS library looks at the extensions.
 10. **Registry version.** `$clientfp_tlsfp_registry` is `1` whenever `$clientfp_tlsfp` is set (§13, Appendix B).
 
 ## 3. Errata in draft v0.1
