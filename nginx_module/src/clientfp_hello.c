@@ -26,7 +26,10 @@ message_header(const uint8_t h[4], size_t *total)
 }
 
 
-/* Checks the record header bytes we have (1..5 of them). 0 or NOTHELLO; *rlen is set when all 5 are there. */
+/*
+ * Checks the record header bytes we have (1..5 of them). 0 or NOTHELLO; *rlen is set when all 5 are there.
+ * Empty records are allowed: they carry nothing, and the TLS library accepts them before the hello is complete.
+ */
 static int
 record_header(const uint8_t *p, size_t n, size_t *rlen)
 {
@@ -41,7 +44,7 @@ record_header(const uint8_t *p, size_t n, size_t *rlen)
     if (n >= 5) {
         *rlen = (size_t) p[3] << 8 | p[4];
 
-        if (*rlen == 0 || *rlen > TLS_RECORD_MAX) {
+        if (*rlen > TLS_RECORD_MAX) {
             return CLIENTFP_HELLO_NOTHELLO;
         }
     }

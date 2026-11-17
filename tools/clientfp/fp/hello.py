@@ -41,7 +41,8 @@ def _message_header(h: bytes) -> Status | int:
 
 
 def _record_header(h: bytes) -> Status | int | None:
-    """Checks 0..5 record header bytes: the record length when all 5 are valid, None when fewer, or 'nothello'."""
+    """Checks 0..5 record header bytes: the record length when all 5 are valid, None when fewer, or 'nothello'.
+    Empty records are valid: the TLS library accepts them before the hello is complete."""
     if len(h) >= 1 and h[0] != 22:
         return "nothello"
     if len(h) >= 2 and h[1] != 3:
@@ -49,7 +50,7 @@ def _record_header(h: bytes) -> Status | int | None:
     if len(h) < 5:
         return None
     n = int.from_bytes(h[3:5], "big")
-    return "nothello" if n == 0 or n > RECORD_MAX else n
+    return "nothello" if n > RECORD_MAX else n
 
 
 def tls_capture(raw: bytes) -> TlsResult:

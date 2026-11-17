@@ -553,6 +553,20 @@ def test_hello_tls_hostile(drivers: Path) -> None:
     assert {s for s, _, _ in got} == {0, 1, 2, 3}
 
 
+def test_hello_tls_empty_records(drivers: Path) -> None:
+    """Empty handshake records before and inside the hello are skipped, as the TLS library skips them; otherwise a
+    client could avoid fingerprinting with a handshake that still succeeds."""
+    msg = bytes.fromhex(VECTORS[0]["client_hello_hex"])
+    parts = [ref_hello.records(msg[i:i + 100], [100]) for i in range(0, len(msg), 100)]
+    raws = [
+        _rec(b"") + ref_hello.records(msg, [16384]),
+        _rec(b"") * 32 + ref_hello.records(msg, [16384]),
+        b"".join(p + _rec(b"") for p in parts[:-1]) + parts[-1],
+    ]
+    got = _check_hello([_tls_case(r) for r in raws])
+    assert [(s, m) for s, m, _ in got] == [(0, msg.hex())] * len(raws)
+
+
 def test_hello_quic_against_reference(drivers: Path) -> None:
     """Initial CRYPTO fragments in any order, duplicated, overlapping with conflicting bytes (the first copy wins),
     beyond the message, and hostile offsets and lengths."""

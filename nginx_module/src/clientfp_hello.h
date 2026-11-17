@@ -33,7 +33,8 @@
  * AGAIN: *need is a lower bound on the raw bytes required to finish (or to fail), always > len and
  *        <= CLIENTFP_HELLO_RAW_MAX. Calling again with fewer bytes cannot make progress.
  *
- * Record rules: content type 22 (handshake), version major 3, length 1..16384. The record version and anything
+ * Record rules: content type 22 (handshake), version major 3, length 0..16384. Empty records are skipped (the TLS
+ * library accepts them, so refusing them would let a client avoid fingerprinting). The record version and anything
  * after the message are ignored. Records of other types before the message is complete give NOTHELLO.
  */
 int clientfp_hello_tls(const uint8_t *raw, size_t len, uint8_t *buf, const uint8_t **msg, size_t *msg_len,
