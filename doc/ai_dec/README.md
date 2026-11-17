@@ -39,3 +39,4 @@ Every engineering decision, automatic or human (workflow rule h2), gets one file
 | 033 | [ClientHello capture limit: 16 KiB](decision_033.md) | human |
 | 034 | [Per-connection result in ngx_http_connection_t](decision_034.md) | human |
 | 035 | [HTTP/3 on every target](decision_035.md) | human |
+| 036 | [SSLv2-format ClientHellos: no fingerprint, refused by default](decision_036.md) | human |
