@@ -3,8 +3,8 @@
 Upstream definition: FoxIO's JA4.md,
 https://github.com/FoxIO-LLC/ja4/blob/16b96d95c220762cf658f67d678cda2aac95c81e/technical_details/JA4.md
 
-Input is the ClientHello *handshake message* (msg_type 0x01, 3-byte length, body), exactly as OpenSSL's
-msg_callback delivers it, or the TLS records (content type 22) that carry it, as captured on the wire.
+Input is the ClientHello *handshake message* (msg_type 0x01, 3-byte length, body), as the module's capture
+reassembles it (clientfp.fp.hello), or the TLS records (content type 22) that carry it, as captured on the wire.
 
     clientfp-ja4 <hex> [--proto t|q|d]     # prints ja4, ja4_r, ja4_o, ja4_ro, a, b_raw, c_raw
     clientfp-ja4 --selftest                # worked examples and ALPN examples of the spec

@@ -1,7 +1,7 @@
 """TLS ClientHello framing shared by the fingerprint calculators (ja4.py, tlsfp.py). No fingerprint logic here.
 
-Input is the ClientHello *handshake message* (msg_type 0x01, 3-byte length, body), exactly as OpenSSL's msg_callback
-delivers it, or the TLS records (content type 22) that carry it, as captured on the wire.
+Input is the ClientHello *handshake message* (msg_type 0x01, 3-byte length, body), as the module's capture reassembles
+it (hello.py), or the TLS records (content type 22) that carry it, as captured on the wire.
 
 Decoding follows the TLS presentation language (RFC 8446 §3): every length must fit what encloses it and fill it
 exactly. The handshake message, the body (which ends with the extensions block, if any), the extensions block and each

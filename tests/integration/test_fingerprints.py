@@ -40,8 +40,8 @@ def test_ja4_probe_all_clients(nginx_pkg: Nginx) -> None:
     assert m, out[-3000:]
     passed, failed, skipped = map(int, m.groups())
     assert failed == 0
-    assert passed >= 40, out[-3000:]
-    # nginx (OpenSSL, security level 0 in the test site) completes every crafted hello the probe sends
+    assert passed >= 39, out[-3000:]
+    # nginx (security level 0 in the test site) completes every crafted hello the probe sends
     assert skipped <= 2, out[-3000:]
     assert re.search(r"^PASS \S*h3\S*\s+local=q13", out, re.M), "no HTTP/3 (QUIC) case passed"
     assert len(re.findall(r"^PASS .*\[ja4,ja4_r,ja4_o,ja4_ro,tlsfp\]", out, re.M)) == passed, "TLSFP not compared"

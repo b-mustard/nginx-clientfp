@@ -1,5 +1,5 @@
-"""JA4 probe: drives several TLS clients (curl, wget, Python urllib/httpx/niquests, openssl s_client, curl_cffi
-browser impersonation, and a tlslite-ng client whose ClientHello is mutated on the fly) at a JA4 endpoint, captures
+"""JA4 probe: drives several TLS clients (curl, wget, Python urllib/httpx/niquests, curl_cffi browser
+impersonation, and a tlslite-ng client whose ClientHello is mutated on the fly) at a JA4 endpoint, captures
 each client's real ClientHello through a local one-shot relay, computes JA4 locally (clientfp.fp.ja4) and compares
 it with what the server reports.
 
@@ -298,15 +298,6 @@ def curl(*args: str, ip: bool = False) -> Runner:
     return run
 
 
-def s_client(*args: str | bytes) -> Runner:
-    def run(o: Target, relay_port: int) -> str:
-        sni = [] if "-noservername" in args else ["-servername", o.host]
-        cmd = ["openssl", "s_client", "-connect", f"127.0.0.1:{relay_port}", "-quiet", *sni, *args]
-        p = subprocess.run(cmd, input=req(o), capture_output=True, timeout=30)
-        return http_body(p.stdout)
-    return run
-
-
 def cffi(target: str) -> Runner:
     def run(o: Target, relay_port: int) -> str:
         from curl_cffi import requests as creq
@@ -472,7 +463,7 @@ def grease_everywhere(ch: Any) -> None:
 
 
 def unknown_exts(ch: Any) -> None:
-    # all of these are ignored (dropped) by OpenSSL's SSL_client_hello_get1_extensions_present()
+    # extension types a TLS server typically does not implement; JA4 counts and hashes them all
     # (tlslite itself already sends 0x000f heartbeat, 0x001c record_size_limit and 0x0015 padding - also unknown)
     ch.extensions = ch.extensions[:2] + [_ext(0x4469, b"\x00\x03\x02h2"), _ext(0x1234),
                                          _ext(0x0022, b"\x00\x02\x04\x03")] + ch.extensions[2:]
@@ -548,15 +539,6 @@ CASES: Final[dict[str, Case]] = {
     "python_httpx_h1": Case(httpx_(), r"t13d\d{4}h1"),
     "python_httpx_h2": Case(httpx_(http2=True), r"t13d\d{4}h1"),  # offers "http/1.1,h2": first value counts
     "python_niquests": Case(niquests_(), r"t13d\d{4}h2"),
-    "s_client_no_alpn": Case(s_client(), r"t13d\d{4}00"),
-    "s_client_no_sni": Case(s_client("-noservername", "-alpn", "http/1.1"), r"t13i\d{4}h1"),
-    "s_client_sigalgs_order": Case(s_client("-alpn", "http/1.1", "-sigalgs",
-                                            "rsa_pss_rsae_sha256:ECDSA+SHA256:RSA+SHA256:ed25519"), r"t13d\d{4}h1"),
-    "s_client_tls12_all_ciphers": Case(s_client("-tls1_2", "-alpn", "http/1.1", "-cipher",
-                                                "ALL:COMPLEMENTOFALL:@SECLEVEL=0"), r"t12d\d{4}h1"),
-    "s_client_serverinfo_unknown": Case(s_client("-alpn", "http/1.1", "-serverinfo", "2570,17513,4660"),
-                                        r"t13d\d{4}h1"),
-    "s_client_nonascii_alpn": Case(s_client("-alpn", b"\xab\xcd,http/1.1"), r"t13d\d{4}ad"),
     "chrome": Case(cffi("chrome"), r"t13d\d{4}h2"),
     "firefox": Case(cffi("firefox"), r"t13d\d{4}h2"),
     "safari": Case(cffi("safari"), r"t13d\d{4}h2"),
@@ -572,6 +554,7 @@ CASES: Final[dict[str, Case]] = {
     "tlslite_many_ciphers_scsv": Case(tlslite(many_ciphers), r"t13d99\d\dh1"),
     "tlslite_future_version": Case(tlslite(future_version), r"t00d\d{4}h1"),
     "tlslite_tls12_only": Case(tlslite(maxVersion=(3, 3)), r"t12d\d{4}h1"),
+    "tlslite_tls12_many_ciphers": Case(tlslite(many_ciphers, maxVersion=(3, 3)), r"t12d99\d\dh1"),
     # spec is silent; clientfp.fp.ja4 falls back to legacy_version (0x0303 -> "12")
     "tlslite_versions_only_grease": Case(tlslite(only_grease_versions), r"t12d\d{4}h1", may_refuse=True),
     "tlslite_no_sni": Case(tlslite(sni=False), r"t13i\d{4}h1"),
@@ -582,8 +565,8 @@ CASES: Final[dict[str, Case]] = {
     "tlslite_tls12_no_sigalgs": Case(tlslite(drop_ext(0x000D), maxVersion=(3, 3)), r"t12d\d{4}h1", may_refuse=True),
     "tlslite_tls12_no_extensions": Case(tlslite(no_extensions, sni=False, alpn=None, maxVersion=(3, 3)),
                                         r"t12i\d{2}0000", may_refuse=True),
-    # no sigalgs again, but resuming a TLS 1.2 session (ticket), which needs no server signature: works on OpenSSL
-    # servers with tickets enabled at any security level
+    # no sigalgs again, but resuming a TLS 1.2 session (ticket), which needs no server signature: works on servers
+    # with session tickets enabled at any security level
     "tlslite_resumed_no_sigalgs": Case(tlslite(drop_ext(0x000D), resume=True, maxVersion=(3, 3)), r"t12d\d{4}h1",
                                        may_refuse=True),
     "tlslite_fragmented_hello": Case(tlslite(record_size=64), r"t13d\d{4}h1"),

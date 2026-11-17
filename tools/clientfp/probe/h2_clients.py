@@ -54,7 +54,7 @@ def c_curl(url: str, insecure: bool) -> str:
 
 def v_curl() -> str:
     first = sh("curl", "-V").split("\n")[0].split()
-    return f"curl {first[1]} " + " ".join(p for p in first if p.startswith(("nghttp2/", "OpenSSL/")))
+    return f"curl {first[1]} " + " ".join(p for p in first if p.startswith("nghttp2/"))
 
 
 def c_httpx(url: str, insecure: bool) -> str:
@@ -196,7 +196,7 @@ HTTPX_VERSION: Final = "httpx 0.28.1 httpcore 1.0.9 h2 4.4.1"
 HTTPX_FP: Final = "1:4096;2:0;4:65535;5:16384;3:100;6:65536|16777216|0|m,a,s,p"
 
 CASES: Final = [
-    ClientCase("curl", c_curl, v_curl, "curl 8.5.0 OpenSSL/3.0.13 nghttp2/1.59.0",
+    ClientCase("curl", c_curl, v_curl, "curl 8.5.0 nghttp2/1.59.0",
                "3:100;4:10485760;2:0|1048510465|0|m,s,a,p", "WU = 1000 MiB - 65535"),
     ClientCase("httpx", c_httpx, v_httpx, HTTPX_VERSION, HTTPX_FP, "httpcore drops setting 8, WU = 2^24"),
     ClientCase("httpx_async", c_httpx_async, v_httpx, HTTPX_VERSION, HTTPX_FP, "same as sync httpx"),
