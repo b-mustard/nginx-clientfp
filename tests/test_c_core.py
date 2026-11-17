@@ -551,8 +551,17 @@ def test_hello_tls_hostile(drivers: Path) -> None:
         raws.append(bytes(raw))
     for _ in range(300):
         raws.append(b"\x16\x03" + bytes(rng.randrange(256) for _ in range(rng.randrange(40))))
+    for _ in range(100):
+        raws.append(bytes([rng.randrange(0x80, 0x100)]) + bytes(rng.randrange(256) for _ in range(rng.randrange(6))))
     got = _check_hello([_tls_case(r) for r in raws])
-    assert {s for s, _, _ in got} == {0, 1, 2, 3}
+    assert {s for s, _, _ in got} == {0, 1, 2, 3, 4}
+
+
+def test_hello_tls_sslv2(drivers: Path) -> None:
+    """SSLv2-format ClientHellos are recognised from their first three bytes (decision 036)."""
+    v2 = b"\x80\x2e\x01\x03\x03\x00\x06\x00\x00\x00\x20" + bytes(38)
+    got = _check_hello([_tls_case(r) for r in (v2, v2[:3], v2[:2], v2[:1], b"\xff\xff\x01", b"\x80\x2e\x02")])
+    assert got == [(4, "-", 0), (4, "-", 0), (1, "-", 3), (1, "-", 3), (4, "-", 0), (2, "-", 0)]
 
 
 def test_hello_tls_empty_records(drivers: Path) -> None:

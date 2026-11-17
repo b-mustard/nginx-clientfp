@@ -525,6 +525,20 @@ def test_tls_hello_half_sent_then_closed(srv: Nginx) -> None:
         assert time.monotonic() - t0 < 5
 
 
+def sslv2_hello(suites: Sequence[int] = (0x002F, 0x0035, 0x00FF)) -> bytes:
+    """An SSLv2-format (backwards-compatible) ClientHello for TLS 1.2. RSA key exchange: the suites the TLS library
+    accepts in this format at security level 0, which the test site uses."""
+    specs = b"".join(b"\x00" + s.to_bytes(2, "big") for s in suites)
+    body = b"\x01\x03\x03" + struct.pack(">HHH", len(specs), 0, 32) + specs + bytes(range(32))
+    return struct.pack(">H", 0x8000 | len(body)) + body
+
+
+def test_tls_sslv2_hello_refused(srv: Nginx) -> None:
+    """decision 036: clientfp_refuse_sslv2_hello is on by default, so the connection is closed before the TLS
+    library sees the hello (which it would answer at the test site's security level 0: see test_package)."""
+    assert tls_exchange(srv.tls, sslv2_hello(), timeout=3) == b""
+
+
 def test_tls_handshake_flood(srv: Nginx) -> None:
     """Half-open handshakes: hello sent, connection dropped. Per-connection state must be freed every time."""
     hello = records(bytes.fromhex(VECTORS[1]["client_hello_hex"]))

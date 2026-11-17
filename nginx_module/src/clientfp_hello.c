@@ -10,6 +10,7 @@
 #define TLS_RECORD_HANDSHAKE   22
 #define TLS_RECORD_MAX         16384     /* RFC 8446 §5.1: plaintext fragment limit */
 #define HS_CLIENT_HELLO        1
+#define SSL2_MT_CLIENT_HELLO   1
 
 
 /* Checks a handshake message header; sets *total to the message size. 0, NOTHELLO or TOOBIG. */
@@ -61,6 +62,17 @@ clientfp_hello_tls(const uint8_t *raw, size_t len, uint8_t *buf, const uint8_t *
     size_t          pos, rlen, have, total, t, k, n, rem, avail, end;
     uint8_t         h[4];
     const uint8_t  *p;
+
+    if (len >= 1 && (raw[0] & 0x80)) {
+        /* SSLv2 record header: 2-byte length with the top bit set, then the message type */
+
+        if (len < 3) {
+            *need = 3;
+            return CLIENTFP_HELLO_AGAIN;
+        }
+
+        return raw[2] == SSL2_MT_CLIENT_HELLO ? CLIENTFP_HELLO_SSLV2 : CLIENTFP_HELLO_NOTHELLO;
+    }
 
     pos = 0;
     have = 0;           /* message bytes collected in buf */

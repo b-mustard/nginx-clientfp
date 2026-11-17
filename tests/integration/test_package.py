@@ -69,6 +69,31 @@ def test_nginx_v(nginx_pkg: Nginx, flavor: str) -> None:
         assert arg in v
 
 
+def test_refuse_sslv2_hello_off(nginx_pkg: Nginx) -> None:
+    """decision 036, `clientfp_refuse_sslv2_hello off`: a second nginx in the container hands an SSLv2-format hello
+    to the TLS library, which answers it with a ServerHello at security level 0; the connection has no fingerprint."""
+    (nginx_pkg.workdir / "sslv2-off.conf").write_text(
+        "pid /tmp/sslv2-off.pid; error_log /tmp/sslv2-off.log info; events {}\n"
+        "http { clientfp_refuse_sslv2_hello off; server { listen 127.0.0.1:9443 ssl;\n"
+        "  ssl_certificate /etc/nginx/test/cert.pem; ssl_certificate_key /etc/nginx/test/key.pem;\n"
+        "  ssl_protocols TLSv1.2; ssl_ciphers ALL:@SECLEVEL=0; } }\n")
+    (nginx_pkg.workdir / "sslv2-client.py").write_text(
+        "import socket, struct\n"
+        "specs = bytes.fromhex('00002f000035')\n"
+        "body = b'\\x01\\x03\\x03' + struct.pack('>HHH', len(specs), 0, 32) + specs + bytes(32)\n"
+        "s = socket.create_connection(('127.0.0.1', 9443), timeout=5)\n"
+        "s.sendall(struct.pack('>H', 0x8000 | len(body)) + body)\n"
+        "print(s.recv(16).hex())\n")
+    nginx_pkg.exec("nginx", "-c", "/etc/nginx/test/sslv2-off.conf")
+    try:
+        reply = nginx_pkg.exec("python3", "/etc/nginx/test/sslv2-client.py").strip()
+        assert reply[:2] == "16" and reply[10:12] == "02", reply          # handshake record, ServerHello
+        log = nginx_pkg.exec("cat", "/tmp/sslv2-off.log")
+        assert "no JA4/TLSFP for this connection: SSLv2-format ClientHello" in log, log
+    finally:
+        nginx_pkg.exec("nginx", "-c", "/etc/nginx/test/sslv2-off.conf", "-s", "quit", check=False)
+
+
 def test_packaged_config_valid(nginx_pkg: Nginx) -> None:
     out = nginx_pkg.exec("nginx", "-t")
     assert "syntax is ok" in out and "test is successful" in out

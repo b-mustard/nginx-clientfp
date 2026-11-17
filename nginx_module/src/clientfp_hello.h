@@ -24,6 +24,7 @@
 #define CLIENTFP_HELLO_AGAIN     1       /* incomplete: more bytes are needed            */
 #define CLIENTFP_HELLO_NOTHELLO  2       /* not a TLS handshake starting with ClientHello */
 #define CLIENTFP_HELLO_TOOBIG    3       /* over CLIENTFP_HELLO_MAX or _RAW_MAX           */
+#define CLIENTFP_HELLO_SSLV2     4       /* an SSLv2-format ClientHello (decision 036)    */
 
 
 /*
@@ -32,6 +33,10 @@
  * DONE:  *msg and *msg_len give the message, pointing into raw when it sits in one record, else into buf.
  * AGAIN: *need is a lower bound on the raw bytes required to finish (or to fail), always > len and
  *        <= CLIENTFP_HELLO_RAW_MAX. Calling again with fewer bytes cannot make progress.
+ *
+ * SSLV2: the first byte has its top bit set and the third is 1 (SSL2_MT_CLIENT_HELLO), which is how TLS libraries
+ * recognise an SSLv2-format ClientHello; it is not reassembled (no fingerprint is defined for it). A top bit with
+ * any other third byte gives NOTHELLO. Until 3 bytes are there: AGAIN with *need = 3.
  *
  * Record rules: content type 22 (handshake), version major 3, length 0..16384. Empty records are skipped (the TLS
  * library accepts them, so refusing them would let a client avoid fingerprinting). The record version and anything

@@ -3,6 +3,7 @@
  *
  * Directives
  *   clientfp on | off;                        http        default on
+ *   clientfp_refuse_sslv2_hello on | off;     http        default on (decision 036)
  *   clientfp_request_header <name> <value>;   http, server
  *
  * Variables
@@ -47,6 +48,7 @@
 
 typedef struct {
     ngx_flag_t                  enable;
+    ngx_flag_t                  refuse_sslv2;
 } ngx_http_clientfp_main_conf_t;
 
 
@@ -122,6 +124,13 @@ static ngx_command_t  ngx_http_clientfp_commands[] = {
       ngx_conf_set_flag_slot,
       NGX_HTTP_MAIN_CONF_OFFSET,
       offsetof(ngx_http_clientfp_main_conf_t, enable),
+      NULL },
+
+    { ngx_string("clientfp_refuse_sslv2_hello"),
+      NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG,
+      ngx_conf_set_flag_slot,
+      NGX_HTTP_MAIN_CONF_OFFSET,
+      offsetof(ngx_http_clientfp_main_conf_t, refuse_sslv2),
       NULL },
 
     { ngx_string("clientfp_request_header"),
@@ -240,6 +249,7 @@ ngx_http_clientfp_create_main_conf(ngx_conf_t *cf)
     }
 
     cmcf->enable = NGX_CONF_UNSET;
+    cmcf->refuse_sslv2 = NGX_CONF_UNSET;
 
     return cmcf;
 }
@@ -251,6 +261,7 @@ ngx_http_clientfp_init_main_conf(ngx_conf_t *cf, void *conf)
     ngx_http_clientfp_main_conf_t  *cmcf = conf;
 
     ngx_conf_init_value(cmcf->enable, 1);
+    ngx_conf_init_value(cmcf->refuse_sslv2, 1);
 
     return NGX_CONF_OK;
 }
@@ -480,6 +491,11 @@ ngx_http_clientfp_finish(ngx_connection_t *c, ngx_http_clientfp_tls_ctx_t *ctx, 
                       "clientfp: no JA4/TLSFP for this connection: not a TLS ClientHello");
         return;
 
+    case CLIENTFP_HELLO_SSLV2:
+        ngx_log_error(NGX_LOG_INFO, c->log, 0,
+                      "clientfp: no JA4/TLSFP for this connection: SSLv2-format ClientHello");
+        return;
+
     default: /* CLIENTFP_HELLO_AGAIN: gave up waiting */
         ngx_log_error(NGX_LOG_INFO, c->log, 0,
                       "clientfp: no JA4/TLSFP for this connection: incomplete ClientHello");
@@ -510,7 +526,8 @@ ngx_http_clientfp_finish(ngx_connection_t *c, ngx_http_clientfp_tls_ctx_t *ctx, 
 
 /*
  * TLS over TCP, called by ngx_http_ssl_handshake() before the TLS library reads anything: NGX_AGAIN to wait for
- * more of the ClientHello, NGX_OK to start the handshake (with or without a fingerprint).
+ * more of the ClientHello, NGX_OK to start the handshake (with or without a fingerprint), NGX_ERROR to close the
+ * connection (an SSLv2-format ClientHello while clientfp_refuse_sslv2_hello is on, decision 036).
  *
  * The socket is peeked, not read, so the TLS library later reads the same bytes. FIONREAD avoids copying until
  * at least the bytes that clientfp_hello_tls() said it needs are there; a hello that keeps arriving in tiny
@@ -521,17 +538,18 @@ ngx_http_clientfp_finish(ngx_connection_t *c, ngx_http_clientfp_tls_ctx_t *ctx, 
 ngx_int_t
 ngx_http_clientfp_tls_hello(ngx_connection_t *c)
 {
-    int                           rc;
-    u_char                       *raw;
-    size_t                        size, msg_len, need;
-    ssize_t                       n;
-    ngx_err_t                     err;
-    ngx_uint_t                    wait;
-    const u_char                 *msg;
-    ngx_http_connection_t        *hc;
-    ngx_http_clientfp_tls_ctx_t  *ctx;
+    int                             rc;
+    u_char                         *raw;
+    size_t                          size, msg_len, need;
+    ssize_t                         n;
+    ngx_err_t                       err;
+    ngx_uint_t                      wait;
+    const u_char                   *msg;
+    ngx_http_connection_t          *hc;
+    ngx_http_clientfp_tls_ctx_t    *ctx;
+    ngx_http_clientfp_main_conf_t  *fmcf;
 #if (NGX_HAVE_FIONREAD)
-    int                           avail;
+    int                             avail;
 #endif
 
     hc = c->data;
@@ -602,6 +620,21 @@ ngx_http_clientfp_tls_hello(ngx_connection_t *c)
     need = 0;
 
     rc = clientfp_hello_tls(raw, (size_t) n, raw + size, &msg, &msg_len, &need);
+
+    if (rc == CLIENTFP_HELLO_SSLV2) {
+        ngx_free(raw);
+
+        fmcf = hc->conf_ctx->main_conf[ngx_http_clientfp_module.ctx_index];
+
+        if (fmcf->refuse_sslv2) {
+            ngx_log_error(NGX_LOG_INFO, c->log, 0, "clientfp: SSLv2-format ClientHello refused");
+            ctx->captured = 1;
+            return NGX_ERROR;
+        }
+
+        ngx_http_clientfp_finish(c, ctx, rc, NULL, 0, 't');
+        return NGX_OK;
+    }
 
     if (rc == CLIENTFP_HELLO_AGAIN && wait && !c->read->pending_eof
         && ++ctx->peeks < NGX_HTTP_CLIENTFP_MAX_PEEKS)

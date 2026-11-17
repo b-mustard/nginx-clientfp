@@ -21,8 +21,8 @@ HELLO_RAW_MAX: Final = 32768
 RECORD_MAX: Final = 16384
 """RFC 8446 §5.1: plaintext record fragment limit."""
 
-Status = Literal["done", "again", "nothello", "toobig"]
-STATUS_CODE: Final[dict[str, int]] = {"done": 0, "again": 1, "nothello": 2, "toobig": 3}
+Status = Literal["done", "again", "nothello", "toobig", "sslv2"]
+STATUS_CODE: Final[dict[str, int]] = {"done": 0, "again": 1, "nothello": 2, "toobig": 3, "sslv2": 4}
 
 
 @dataclass(frozen=True)
@@ -56,10 +56,16 @@ def _record_header(h: bytes) -> Status | int | None:
 def tls_capture(raw: bytes) -> TlsResult:
     """The first handshake message from the leading TLS records of a connection.
 
+    An SSLv2-format ClientHello (first byte's top bit set, third byte 1) gives 'sslv2' and is not reassembled.
     Only complete records count towards the message. While it is incomplete, `need` is a lower bound on the raw
     bytes that must be available before the message can be complete: the end of the record being received, plus
     one more record header and the missing payload when that record cannot hold the rest.
     """
+    if raw[:1] and raw[0] & 0x80:
+        # SSLv2 record header (decision 036): recognised by its message type, never reassembled
+        if len(raw) < 3:
+            return TlsResult("again", need=3)
+        return TlsResult("sslv2" if raw[2] == 1 else "nothello")
     payload = b""
     pos = 0
     total: int | None = None
