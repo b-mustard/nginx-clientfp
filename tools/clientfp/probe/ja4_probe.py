@@ -479,6 +479,12 @@ def many_ciphers(ch: Any) -> None:
     ch.cipher_suites = ch.cipher_suites + [0x00FF, 0x5600, 0xFE00, 0xFEFF] + list(range(0x0100, 0x0100 + 100))
 
 
+def many_ciphers_no_fallback(ch: Any) -> None:
+    # without TLS_FALLBACK_SCSV (0x5600): with a TLS 1.2 maximum it makes a TLS 1.3 server abort the handshake with
+    # inappropriate_fallback (RFC 7507)
+    ch.cipher_suites = ch.cipher_suites + [0x00FF, 0xFE00, 0xFEFF] + list(range(0x0100, 0x0100 + 100))
+
+
 def reversed_sigalgs(ch: Any) -> None:
     _get(ch, 0x000D).sigalgs = list(reversed(_get(ch, 0x000D).sigalgs))
 
@@ -554,7 +560,7 @@ CASES: Final[dict[str, Case]] = {
     "tlslite_many_ciphers_scsv": Case(tlslite(many_ciphers), r"t13d99\d\dh1"),
     "tlslite_future_version": Case(tlslite(future_version), r"t00d\d{4}h1"),
     "tlslite_tls12_only": Case(tlslite(maxVersion=(3, 3)), r"t12d\d{4}h1"),
-    "tlslite_tls12_many_ciphers": Case(tlslite(many_ciphers, maxVersion=(3, 3)), r"t12d99\d\dh1"),
+    "tlslite_tls12_many_ciphers": Case(tlslite(many_ciphers_no_fallback, maxVersion=(3, 3)), r"t12d99\d\dh1"),
     # spec is silent; clientfp.fp.ja4 falls back to legacy_version (0x0303 -> "12")
     "tlslite_versions_only_grease": Case(tlslite(only_grease_versions), r"t12d\d{4}h1", may_refuse=True),
     "tlslite_no_sni": Case(tlslite(sni=False), r"t13i\d{4}h1"),
