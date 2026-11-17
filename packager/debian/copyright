@@ -8,13 +8,6 @@ Copyright: 2002-2021 Igor Sysoev
            2026 F5, Inc.
 License: BSD-2-clause
 
-Files: openssl/*
-Copyright: 1998-2026 The OpenSSL Project Authors
-           1995-1998 Eric A. Young, Tim J. Hudson
-License: Apache-2.0
- On Debian systems, the full text of the Apache License 2.0 can be found in
- /usr/share/common-licenses/Apache-2.0.
-
 Files: clientfp/*
 Copyright: 2026 nginx-clientfp contributors
 License: BSD-2-clause

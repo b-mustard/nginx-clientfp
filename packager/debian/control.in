@@ -2,7 +2,7 @@ Source: nginx-clientfp
 Section: httpd
 Priority: optional
 Maintainer: nginx-clientfp maintainers <noreply@example.com>
-Build-Depends: debhelper-compat (= 13), libpcre2-dev, zlib1g-dev, perl, binutils
+Build-Depends: debhelper-compat (= 13), libpcre2-dev, libssl-dev, zlib1g-dev, perl, binutils
 Standards-Version: 4.7.0
 Rules-Requires-Root: no
 Homepage: https://nginx.org
@@ -15,12 +15,12 @@ Conflicts: nginx, nginx-common, nginx-core, nginx-full, nginx-light, nginx-extra
 Replaces: nginx, nginx-common, nginx-core, nginx-full, nginx-light, nginx-extras
 Provides: nginx, httpd, httpd-cgi
 Description: nginx @NGINX_VERSION@ with JA4, TLSFP and HTTP/2 client fingerprinting
- nginx web and reverse proxy server, statically linked with OpenSSL
- @OPENSSL_VERSION@, plus ngx_http_clientfp_module. The module computes the JA4
- and nDPI TLSFP TLS client fingerprints and the Akamai HTTP/2 client
- fingerprint of every connection, exposes them as $clientfp_* variables and
- can pass them to upstream servers as request headers that clients cannot
- spoof.
+ nginx web and reverse proxy server with ngx_http_clientfp_module. The
+ module computes the JA4 and nDPI TLSFP TLS client fingerprints (TCP and
+ QUIC) and the Akamai HTTP/2 client fingerprint of every connection, exposes
+ them as $clientfp_* variables and can pass them to upstream servers as
+ request headers that clients cannot spoof. TLS comes from the
+ distribution's libssl.
  .
  Debian/Ubuntu file layout (sites-available, sites-enabled, snippets,
  modules-enabled). Replaces the distribution's nginx packages.

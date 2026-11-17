@@ -1,5 +1,6 @@
 #!/usr/bin/make -f
-# Rendered by packager/debian.py. Source tree layout: nginx/ (patched), openssl/, clientfp/ (module), debian/.
+# Rendered by packager/debian.py. Source tree layout: nginx/ (patched), clientfp/ (module), debian/.
+# TLS: the distribution's libssl, linked dynamically (decision 029).
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 DPKG_EXPORT_BUILDFLAGS = 1
@@ -8,13 +9,8 @@ include /usr/share/dpkg/buildflags.mk
 PKG := debian/nginx-clientfp
 JOBS := $(or $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS))),1)
 
-# OpenSSL is built by nginx's own make rules (auto/lib/openssl/make: no-shared no-threads + these options)
-OPENSSL_OPT := @OPENSSL_OPT@
-
-# -Wl,--exclude-libs,ALL: nginx links with -Wl,-E for dynamic modules; without this flag every symbol of the
-# static libssl.a/libcrypto.a would be exported and could interpose on other libraries' OpenSSL.
 CC_OPT := $(CFLAGS) $(CPPFLAGS) -fPIC
-LD_OPT := $(LDFLAGS) -fPIC -Wl,--exclude-libs,ALL
+LD_OPT := $(LDFLAGS) -fPIC
 
 %:
 	dh $@
@@ -22,8 +18,6 @@ LD_OPT := $(LDFLAGS) -fPIC -Wl,--exclude-libs,ALL
 override_dh_auto_configure:
 	cd nginx && ./auto/configure \
 		@CONFIGURE_ARGS@ \
-		--with-openssl=$(CURDIR)/openssl \
-		--with-openssl-opt="$(OPENSSL_OPT)" \
 		--add-module=$(CURDIR)/clientfp \
 		--with-cc-opt="$(CC_OPT)" \
 		--with-ld-opt="$(LD_OPT)"

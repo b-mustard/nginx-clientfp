@@ -1,6 +1,7 @@
 """AddressSanitizer + UBSan build of the patched nginx, for hostile-input tests (t3). Not packaged.
 
-Uses the same prepared tree as a package build (patched nginx, OpenSSL, module) and the target's build image.
+Uses the same prepared tree as a package build (patched nginx, module) and the target's build image, whose libssl
+it links like the package does.
 NGX_DEBUG_PALLOC makes every nginx pool allocation a separate malloc(), so ASan sees pool overflows too.
 The result is build/asan/<flavor>/sbin/nginx with prefix build/asan/<flavor>/ (paths inside the container).
 """
@@ -56,7 +57,6 @@ def build(v: Versions, jobs: int, target_name: str = "ubuntu-24.04") -> Path:
 set -e
 cd {CONTAINER_REPO}/{rel_root}/nginx
 ./auto/configure --prefix={CONTAINER_REPO}/{rel_out} {' '.join(CONFIGURE)} \\
-    --with-openssl={CONTAINER_REPO}/{rel_root}/openssl --with-openssl-opt='no-module no-docs no-tests no-apps' \\
     --add-module={CONTAINER_REPO}/{rel_root}/clientfp \\
     --with-cc-opt='-O1 -g {san} -DNGX_DEBUG_PALLOC=1' --with-ld-opt='{san}'
 make -j{jobs}

@@ -10,12 +10,11 @@ import re
 import subprocess
 from pathlib import Path
 
-from .model import NGINX_GIT, OPENSSL_GIT, Flavor, Versions
+from .model import NGINX_GIT, Flavor, Versions
 from .util import REPO, BuildError, log, run
 
 EXTERN = REPO / "extern_src"
 NGINX_REPO = EXTERN / "nginx"
-OPENSSL_REPO = EXTERN / "openssl"
 
 
 def _git(repo: Path, *args: str, capture: bool = False) -> str:
@@ -62,42 +61,35 @@ def _tag_version(tag: str) -> str:
     return tag.split("-", 1)[1]
 
 
-def resolve(flavor: Flavor, revision: str, *, offline: bool = False, nginx: str | None = None,
-            openssl: str | None = None) -> Versions:
-    """Pick versions for a flavor (newest upstream unless pinned) and make sure their tags are local."""
+def resolve(flavor: Flavor, revision: str, *, offline: bool = False, nginx: str | None = None) -> Versions:
+    """Pick the nginx version for a flavor (newest upstream unless pinned) and make sure its tag is local."""
     ensure_repo(NGINX_REPO, NGINX_GIT)
-    ensure_repo(OPENSSL_REPO, OPENSSL_GIT)
 
-    picked: dict[str, str] = {}
-    for key, repo, url, pattern, pin in (
-        ("nginx", NGINX_REPO, NGINX_GIT, flavor.nginx_tag_re, nginx),
-        ("openssl", OPENSSL_REPO, OPENSSL_GIT, flavor.openssl_tag_re, openssl),
-    ):
-        prefix = "release-" if key == "nginx" else "openssl-"
-        if pin:
-            tag = prefix + pin
-            if not pattern.match(tag):
-                raise BuildError(f"{key} {pin} is not in the {flavor.name} flavor's series")
-        else:
-            tags: list[str] = []
-            if not offline:
-                try:
-                    tags = remote_tags(url)
-                except BuildError:
-                    log(f"WARNING: cannot list {url}; falling back to local tags")
-            if not tags:
-                tags = local_tags(repo)
-            found = newest(tags, pattern)
-            if found is None:
-                raise BuildError(f"no {key} release matching {pattern.pattern} (offline={offline})")
-            tag = found
+    pattern = flavor.nginx_tag_re
+    if nginx:
+        tag = "release-" + nginx
+        if not pattern.match(tag):
+            raise BuildError(f"nginx {nginx} is not in the {flavor.name} flavor's series")
+    else:
+        tags: list[str] = []
         if not offline:
-            fetch_tag(repo, tag)
-        elif tag not in local_tags(repo):
-            raise BuildError(f"{tag} is not available locally and --offline was given")
-        picked[key] = _tag_version(tag)
+            try:
+                tags = remote_tags(NGINX_GIT)
+            except BuildError:
+                log(f"WARNING: cannot list {NGINX_GIT}; falling back to local tags")
+        if not tags:
+            tags = local_tags(NGINX_REPO)
+        found = newest(tags, pattern)
+        if found is None:
+            raise BuildError(f"no nginx release matching {pattern.pattern} (offline={offline})")
+        tag = found
+    if not offline:
+        fetch_tag(NGINX_REPO, tag)
+    elif tag not in local_tags(NGINX_REPO):
+        raise BuildError(f"{tag} is not available locally and --offline was given")
 
-    return Versions(flavor, picked["nginx"], picked["openssl"], revision)
+    return Versions(flavor, _tag_version(tag), revision)
+
 
 
 def export(repo: Path, tag: str, dest: Path) -> None:

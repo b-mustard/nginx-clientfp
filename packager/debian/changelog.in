@@ -1,5 +1,5 @@
 nginx-clientfp (@DEB_VERSION@) unstable; urgency=medium
 
-  * nginx @NGINX_VERSION@, OpenSSL @OPENSSL_VERSION@ (static), ngx_http_clientfp_module.
+  * nginx @NGINX_VERSION@ with ngx_http_clientfp_module.
 
  -- nginx-clientfp maintainers <noreply@example.com>  @DATE@

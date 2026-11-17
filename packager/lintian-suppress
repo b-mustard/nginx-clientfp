@@ -1,6 +1,4 @@
 # lintian tags accepted for nginx-clientfp, one per line; each needs a reason.
-# Static OpenSSL is the point of this package (gs6).
-embedded-library
 # The maintainer address is a placeholder by project policy (no personal emails).
 mail-address-loops-or-bounces
 # Built from upstream git, not uploaded to a Debian archive: no ITP bug to close.

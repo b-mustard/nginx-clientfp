@@ -29,9 +29,7 @@ class Artifact:
     deb: str
     dbgsym: str | None
     nginx: str
-    openssl: str
     revision: str
-    exported_openssl_symbols: int
     needed: list[str]
     lintian_exit: int
 
@@ -44,7 +42,7 @@ def package(tree_root: Path, target_name: str, jobs: int, lintian: bool = True) 
     if missing.returncode != 0:
         raise BuildError("missing build dependencies (see above); install them with:\n"
                          "  sudo apt-get install build-essential debhelper dpkg-dev fakeroot lintian "
-                         "libpcre2-dev zlib1g-dev\nor build in docker: ./build.sh build --target <distro>")
+                         "libpcre2-dev libssl-dev zlib1g-dev\nor build in docker: ./build.sh build --target <distro>")
 
     meta = json.loads((tree_root / "debian" / "clientfp-build.json").read_text())
     run(["dpkg-buildpackage", "-b", "-uc", "-us", f"-j{jobs}"], cwd=tree_root,
@@ -56,11 +54,9 @@ def package(tree_root: Path, target_name: str, jobs: int, lintian: bool = True) 
         raise BuildError(f"dpkg-buildpackage did not produce {deb.name}")
     dbg = sorted(parent.glob("nginx-clientfp-dbgsym_*"))
 
-    libs = [tree_root / "openssl" / ".openssl" / "lib" / name for name in ("libssl.a", "libcrypto.a")]
-    report = verify.check(deb, libs)
+    report = verify.check(deb)
     if not report.ok:
-        raise BuildError(f"{deb.name} failed verification: NEEDED={report.needed}, "
-                         f"{len(report.exported_openssl)} OpenSSL symbols exported, "
+        raise BuildError(f"{deb.name} failed verification: NEEDED={report.needed} lacks {report.missing_needed}, "
                          f"missing module/patch symbols={report.missing_hooks}")
     lint = verify.lintian(deb) if lintian else -1
 
@@ -71,8 +67,7 @@ def package(tree_root: Path, target_name: str, jobs: int, lintian: bool = True) 
         shutil.copy2(d, out / d.name)
     art = Artifact(target_name, str((out / deb.name).relative_to(REPO)),
                    str((out / dbg[0].name).relative_to(REPO)) if dbg else None,
-                   meta["nginx"], meta["openssl"], meta["revision"], len(report.exported_openssl),
-                   report.needed, lint)
+                   meta["nginx"], meta["revision"], report.needed, lint)
     (out / (deb.name + ".json")).write_text(json.dumps(asdict(art), indent=2) + "\n")
     log(f"OK {art.deb}")
     return art
@@ -82,7 +77,7 @@ def package(tree_root: Path, target_name: str, jobs: int, lintian: bool = True) 
 
 def write_meta(tree_root: Path, v: Versions) -> None:
     (tree_root / "debian" / "clientfp-build.json").write_text(json.dumps({
-        "nginx": v.nginx, "openssl": v.openssl, "revision": v.revision, "deb_filename": v.deb_filename,
+        "nginx": v.nginx, "revision": v.revision, "deb_filename": v.deb_filename,
     }) + "\n")
 
 

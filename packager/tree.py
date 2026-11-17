@@ -2,7 +2,6 @@
 
     build/<target>/<flavor>/<tree_name>/
         nginx/      nginx at the release tag + patches/nginx/<series>/*.patch
-        openssl/    OpenSSL at the release tag + patches/openssl/<series>/*.patch (none today, decision 006)
         clientfp/   copy of nginx_module/
         debian/     rendered from packager/debian/
 """
@@ -57,9 +56,6 @@ def prepare(target_name: str, v: Versions) -> Path:
 
     sources.export(sources.NGINX_REPO, v.nginx_tag, root / "nginx")
     apply_patches("nginx", v.flavor.nginx_series, root / "nginx")
-
-    sources.export(sources.OPENSSL_REPO, v.openssl_tag, root / "openssl")
-    apply_patches("openssl", v.flavor.openssl_series, root / "openssl")
 
     shutil.copytree(MODULE, root / "clientfp", ignore=shutil.ignore_patterns("tests", "*.o", "*.a"))
     debian.render(root / "debian", v)

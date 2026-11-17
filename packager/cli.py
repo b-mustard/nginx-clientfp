@@ -41,7 +41,7 @@ def _targets(arg: str) -> list[tuple[str, bool]]:
 def cmd_fetch(a: argparse.Namespace) -> int:
     for name in _flavors(a.flavor):
         v = sources.resolve(FLAVORS[name], a.revision, offline=a.offline)
-        print(f"{name}: nginx {v.nginx}  openssl {v.openssl}  ->  {v.deb_filename}")
+        print(f"{name}: nginx {v.nginx}  ->  {v.deb_filename}")
     return 0
 
 
@@ -51,8 +51,8 @@ def cmd_build(a: argparse.Namespace) -> int:
         raise BuildError("docker is not available; use --target native")
     versions: list[Versions] = []
     for name in _flavors(a.flavor):
-        pins = {"nginx": a.nginx, "openssl": a.openssl} if a.flavor != "all" else {}
-        versions.append(sources.resolve(FLAVORS[name], a.revision, offline=a.offline, **pins))
+        pin = a.nginx if a.flavor != "all" else None
+        versions.append(sources.resolve(FLAVORS[name], a.revision, offline=a.offline, nginx=pin))
     built: list[Path] = []
     for target, native in targets:
         for v in versions:
@@ -89,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd")
 
     def common(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--flavor", default="all", help="1.31 (OpenSSL 4.0), 1.30 (OpenSSL 3.5), or all")
+        p.add_argument("--flavor", default="all", help="nginx line: 1.31, 1.30, or all")
         p.add_argument("--revision", default="1", help="Debian revision, the -N in the file name (gs9)")
         p.add_argument("--offline", action="store_true", help="use only tags already in extern_src/")
 
@@ -102,7 +102,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--target", default="native",
                    help=f"native (this distro, no docker), all, or a comma list of: {', '.join(TARGETS)}")
     p.add_argument("--nginx", help="pin the nginx version (single flavor only)")
-    p.add_argument("--openssl", help="pin the OpenSSL version (single flavor only)")
     p.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     p.add_argument("--no-lintian", action="store_true")
     p.set_defaults(func=cmd_build)

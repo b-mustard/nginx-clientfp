@@ -60,28 +60,13 @@ CONFIGURE_ARGS = [
     "--with-stream_realip_module",
 ]
 
-# Appended to nginx's "./config --prefix=... no-shared no-threads" (auto/lib/openssl/make).
-# OPENSSLDIR: decision 007. no-module: providers are built into libcrypto, nothing is dlopen()ed from a
-# build-tree path. enable-ktls matches the distro OpenSSL builds.
-OPENSSL_OPT = [
-    "--openssldir=/etc/nginx/openssl",
-    "no-module",
-    "no-docs",
-    "no-tests",
-    "no-apps",
-    "enable-ktls",
-]
-
-
 def substitutions(v: Versions) -> dict[str, str]:
     epoch = int(os.environ.get("SOURCE_DATE_EPOCH", time.time()))
     return {
         "@DEB_VERSION@": v.deb_version,
         "@NGINX_VERSION@": v.nginx,
-        "@OPENSSL_VERSION@": v.openssl,
         "@DATE@": email.utils.formatdate(epoch, localtime=False),
         "@CONFIGURE_ARGS@": " \\\n\t\t".join(CONFIGURE_ARGS),
-        "@OPENSSL_OPT@": " ".join(OPENSSL_OPT),
     }
 
 
