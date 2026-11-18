@@ -2,7 +2,10 @@
 every recorded ClientHello (as a message, as TLS records, as QUIC CRYPTO fragments) and a few HTTP/2 event streams.
 `--fuzz-seconds` per target (default 60).
 
-Any crash, sanitizer report, leak or timeout fails the test; the reproducer is kept in build/fuzz/<target>/."""
+Any crash, sanitizer report, leak or timeout fails the test; the reproducer is kept in build/fuzz/<target>/.
+
+The corpus the run leaves is then replayed under valgrind's memcheck (tests/fuzz/replay_main.c), built without
+sanitizers at -O2 as the package is: memcheck also reports reads of uninitialised memory, which ASan does not."""
 
 from __future__ import annotations
 
@@ -13,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from .conftest import REPO
-from .test_c_core import IMAGE, drivers  # noqa: F401  (fixture: builds the ctest image)
+from .conftest import REPO, VALGRIND
+from .test_c_core import IMAGE, ctest_image  # noqa: F401  (fixture: builds the ctest image)
 
 pytestmark = [pytest.mark.docker, pytest.mark.slow]
 
@@ -54,7 +57,7 @@ def _seed_h2(corpus: Path) -> None:
 
 
 @pytest.mark.parametrize("target", list(SOURCES))
-def test_fuzz(drivers: Path, target: str, request: pytest.FixtureRequest) -> None:  # noqa: F811
+def test_fuzz(ctest_image: str, target: str, request: pytest.FixtureRequest) -> None:  # noqa: F811
     seconds = int(request.config.getoption("--fuzz-seconds"))
     work = OUT / target
     corpus = work / "corpus"
@@ -76,3 +79,16 @@ def test_fuzz(drivers: Path, target: str, request: pytest.FixtureRequest) -> Non
     (work / "fuzz.log").write_text(log)
     assert proc.returncode == 0, log[-6000:]
     assert "stat::number_of_executed_units" in log
+
+    srcs = " ".join("nginx_module/src/" + s for s in SOURCES[target])
+    script = (
+        f"set -e; gcc -O2 -g -Wall -Wextra -Werror -Inginx_module/src -o {rel}/replay_{target} "
+        f"tests/fuzz/replay_main.c tests/fuzz/fuzz_{target}.c {srcs}; "
+        f"{' '.join(VALGRIND)} {rel}/replay_{target} {rel}/corpus"
+    )
+    proc = subprocess.run(["docker", "run", "--rm", "-v", f"{REPO}:/work", "-w", "/work", IMAGE, "bash", "-c", script],
+                          capture_output=True, text=True, check=False)
+    log = proc.stdout + proc.stderr
+    (work / "replay.log").write_text(log)
+    assert proc.returncode == 0, log[-6000:]
+    assert "replayed" in log

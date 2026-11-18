@@ -1,6 +1,6 @@
 """Shared pytest options and helpers.
 
-Markers (pyproject.toml): nginx (needs a built .deb or ASan binary), docker, network, slow.
+Markers (pyproject.toml): nginx (needs a built .deb, ASan or valgrind binary), docker, network, slow.
 """
 
 from __future__ import annotations
@@ -12,6 +12,12 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
+
+# valgrind's memcheck as the tests run it. -q: only errors are printed, so any output is a finding. Leaks of the
+# definite, indirect and possible kinds count as errors; still-reachable blocks do not.
+VALGRIND = ("valgrind", "-q", "--error-exitcode=99", "--leak-check=full",
+            "--show-leak-kinds=definite,indirect,possible", "--errors-for-leak-kinds=definite,indirect,possible",
+            "--track-origins=yes", "--num-callers=30", "--vgdb=no")
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
