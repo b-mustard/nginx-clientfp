@@ -45,10 +45,10 @@ index 8173bc8..3ada10d 100644
                                f->offset)
          == NGX_CHAIN_ERROR)
 diff --git a/src/http/ngx_http_request.c b/src/http/ngx_http_request.c
-index c8dff23..5b6af34 100644
+index c8dff23..7769946 100644
 --- a/src/http/ngx_http_request.c
 +++ b/src/http/ngx_http_request.c
-@@ -761,6 +761,36 @@ ngx_http_ssl_handshake(ngx_event_t *rev)
+@@ -761,6 +761,39 @@ ngx_http_ssl_handshake(ngx_event_t *rev)
              ngx_log_debug1(NGX_LOG_DEBUG_HTTP, rev->log, 0,
                             "https ssl handshake: 0x%02Xd", buf[0]);
  
@@ -70,8 +70,11 @@ index c8dff23..5b6af34 100644
 +                    cscf = ngx_http_get_module_srv_conf(hc->conf_ctx,
 +                                                        ngx_http_core_module);
 +                    ngx_add_timer(rev, cscf->client_header_timeout);
-+                    ngx_reusable_connection(c, 1);
 +                }
++
++                /* the handshake has begun: not closed to free connections */
++
++                ngx_reusable_connection(c, 0);
 +
 +                if (ngx_handle_read_event(rev, 0) != NGX_OK) {
 +                    ngx_http_close_connection(c);
