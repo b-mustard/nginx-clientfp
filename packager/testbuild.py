@@ -1,9 +1,12 @@
-"""AddressSanitizer + UBSan build of the patched nginx, for hostile-input tests (t3). Not packaged.
+"""Builds of the patched nginx for the integration tests (t3). Not packaged.
 
-Uses the same prepared tree as a package build (patched nginx, module) and the target's build image, whose libssl
-it links like the package does.
-NGX_DEBUG_PALLOC makes every nginx pool allocation a separate malloc(), so ASan sees pool overflows too.
-The result is build/asan/<flavor>/sbin/nginx with prefix build/asan/<flavor>/ (paths inside the container).
+- "asan": AddressSanitizer + UBSan, -O1.
+- "valgrind": no sanitizers, -O2 as the package is, for running under valgrind's memcheck.
+
+Both use the same prepared tree as a package build (patched nginx, module) and the target's build image, whose
+libssl they link like the package does. NGX_DEBUG_PALLOC makes every nginx pool allocation a separate malloc(), so
+ASan and memcheck see pool overflows too. The result is build/<kind>/<flavor>/sbin/nginx with prefix
+build/<kind>/<flavor>/ (paths inside the container).
 """
 
 from __future__ import annotations
@@ -46,23 +49,30 @@ CONFIGURE = [
 ]
 
 
-def asan_dir(v: Versions) -> Path:
-    return REPO / "build" / "asan" / v.flavor.name
+KINDS = ("asan", "valgrind")
 
 
-def build(v: Versions, jobs: int, target_name: str = "ubuntu-24.04") -> Path:
+def out_dir(kind: str, v: Versions) -> Path:
+    return REPO / "build" / kind / v.flavor.name
+
+
+def build(kind: str, v: Versions, jobs: int, target_name: str = "ubuntu-24.04") -> Path:
     target = TARGETS[target_name]
-    root = tree.prepare("asan-src", v)
-    out = asan_dir(v)
+    root = tree.prepare(f"{kind}-src", v)
+    out = out_dir(kind, v)
     rel_root = root.relative_to(REPO)
     rel_out = out.relative_to(REPO)
-    san = sanitizer_flags(root / "nginx")
+    if kind == "asan":
+        san = sanitizer_flags(root / "nginx")
+        cc_opt, ld_opt = f"-O1 -g {san} -DNGX_DEBUG_PALLOC=1", san
+    else:
+        cc_opt, ld_opt = "-O2 -g -DNGX_DEBUG_PALLOC=1", ""
     script = f"""
 set -e
 cd {CONTAINER_REPO}/{rel_root}/nginx
 ./auto/configure --prefix={CONTAINER_REPO}/{rel_out} {' '.join(CONFIGURE)} \\
     --add-module={CONTAINER_REPO}/{rel_root}/clientfp \\
-    --with-cc-opt='-O1 -g {san} -DNGX_DEBUG_PALLOC=1' --with-ld-opt='{san}'
+    --with-cc-opt='{cc_opt}' --with-ld-opt='{ld_opt}'
 make -j{jobs}
 make install
 """

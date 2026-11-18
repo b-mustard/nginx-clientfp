@@ -67,12 +67,12 @@ def cmd_package(a: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_asan(a: argparse.Namespace) -> int:
-    from . import asan
+def cmd_testbuild(a: argparse.Namespace) -> int:
+    from . import testbuild
 
     for name in _flavors(a.flavor):
         v = sources.resolve(FLAVORS[name], a.revision, offline=a.offline)
-        print(asan.build(v, a.jobs).relative_to(REPO))
+        print(testbuild.build(a.cmd, v, a.jobs).relative_to(REPO))
     return 0
 
 
@@ -116,7 +116,13 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("asan", help="build an ASan/UBSan nginx into build/asan/<flavor>/ (tests only)")
     common(p)
     p.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
-    p.set_defaults(func=cmd_asan)
+    p.set_defaults(func=cmd_testbuild)
+
+    p = sub.add_parser("valgrind", help="build an nginx to run under valgrind into build/valgrind/<flavor>/ "
+                                        "(tests only)")
+    common(p)
+    p.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
+    p.set_defaults(func=cmd_testbuild)
 
     p = sub.add_parser("clean", help="remove build/ and dist/")
     p.add_argument("--all", action="store_true", help="also remove extern_src/")
