@@ -39,6 +39,10 @@ CONFIGURE = [
     "--with-http_v3_module",
     "--with-http_realip_module",
     "--with-http_stub_status_module",
+    # not in the package, which uses epoll only: lets tests run the module's ClientHello wait under level-triggered
+    # event methods (tests/integration/test_hello_wait.py)
+    "--with-poll_module",
+    "--with-select_module",
 ]
 
 
