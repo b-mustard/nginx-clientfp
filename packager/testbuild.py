@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Builds of the patched nginx for the integration tests (t3). Not packaged.
 
 - "asan": AddressSanitizer + UBSan, -O1.

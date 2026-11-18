@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """A running nginx-clientfp for integration tests.
 
 `nginx_pkg`: the built .deb from dist/<target>/ installed with dpkg into a clean <target> container (proving its

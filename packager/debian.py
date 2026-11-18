@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Render packager/debian/ into a build tree's debian/ directory (decision 010)."""
 
 from __future__ import annotations

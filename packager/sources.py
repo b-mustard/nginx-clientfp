@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Upstream sources: find the newest release of each series, keep a git clone of it up to date (gs2), export it.
 
 Clones live in extern_src/ and only ever receive shallow tag fetches, so they stay small. Export uses

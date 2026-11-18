@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * Test driver for nginx_module/src/clientfp_ja4.c.
  *
  * stdin: one ClientHello per line: "<proto> <hex handshake message>" (proto t|q).

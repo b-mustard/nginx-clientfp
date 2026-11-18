@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """How the TLS ClientHello capture waits for the rest of a hello (decisions 030, 037, 038). Each case runs in an
 nginx of its own with the settings under test.
 

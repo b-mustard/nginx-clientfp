@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Build matrix: flavors (nginx lines), targets (distros), resolved versions."""
 
 from __future__ import annotations

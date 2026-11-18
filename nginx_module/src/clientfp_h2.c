@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * Akamai HTTP/2 client fingerprint recorder. See clientfp_h2.h and doc/http2_sig.md.
  */
 

@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * libFuzzer target: ClientHello capture (clientfp_hello.c), then both fingerprints of whatever it captures.
  *
  * data[0] even: data[1..] is the start of a TCP connection (TLS records); the capture also runs on a prefix.

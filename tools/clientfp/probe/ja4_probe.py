@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """JA4 probe: drives several TLS clients (curl, wget, Python urllib/httpx/niquests, curl_cffi browser
 impersonation, and a tlslite-ng client whose ClientHello is mutated on the fly) at a JA4 endpoint, captures
 each client's real ClientHello through a local one-shot relay, computes JA4 locally (clientfp.fp.ja4) and compares

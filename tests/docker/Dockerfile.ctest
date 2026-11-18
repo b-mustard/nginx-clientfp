@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+#
 # Standalone C tests and libFuzzer targets for nginx_module/src (tests/test_c_core.py, tests/test_fuzz.py), run
 # under ASan/UBSan and under valgrind.
 FROM ubuntu:24.04

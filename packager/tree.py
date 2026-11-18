@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Assemble the source tree that dpkg-buildpackage builds:
 
     build/<target>/<flavor>/<tree_name>/

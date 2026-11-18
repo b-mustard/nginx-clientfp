@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """A real TLS client (Python's ssl over memory BIOs), so a test decides how its first flight reaches the server: the
 bytes, their record framing, and their TCP segmentation and timing."""
 

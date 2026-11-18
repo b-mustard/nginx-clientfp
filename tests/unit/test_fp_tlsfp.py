@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """TLSFP reference calculator (tools/clientfp/fp/tlsfp.py) against the spec text (doc/nDPI_TLS_Fingerprint.md) and
 decisions 022-027. Expected hash inputs are written out by hand and hashed here, never taken from the implementation."""
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Post-build checks on the produced .deb.
 
 - TLS comes from the distribution's libssl, linked dynamically (decision 029): the executable must need libssl and

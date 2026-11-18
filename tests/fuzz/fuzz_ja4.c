@@ -1,4 +1,9 @@
-/* libFuzzer target: arbitrary bytes as a ClientHello handshake message; every form is formatted. */
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
+ * libFuzzer target: arbitrary bytes as a ClientHello handshake message; every form is formatted.
+ */
 
 #include <stdlib.h>
 #include <string.h>

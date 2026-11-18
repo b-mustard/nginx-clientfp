@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * ClientHello capture from TLS records (TCP) or QUIC Initial CRYPTO frames. See clientfp_hello.h.
  */
 

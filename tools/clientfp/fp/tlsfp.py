@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """nDPI TLS Client Fingerprint (TLSFP): reference calculator.
 
 Normative source: doc/nDPI_TLS_Fingerprint.md (draft v0.1, ntop/nDPI a01ea9463125), as interpreted in

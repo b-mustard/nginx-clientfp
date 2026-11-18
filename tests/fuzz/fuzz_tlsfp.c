@@ -1,4 +1,9 @@
-/* libFuzzer target: arbitrary bytes as a ClientHello handshake message for the TLSFP core. */
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
+ * libFuzzer target: arbitrary bytes as a ClientHello handshake message for the TLSFP core.
+ */
 
 #include <stdlib.h>
 #include <string.h>

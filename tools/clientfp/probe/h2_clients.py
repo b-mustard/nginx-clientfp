@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Run real HTTP/2 client libraries and tools against a fingerprint endpoint and compare the Akamai HTTP/2
 fingerprint with the value recorded from the reference (kittens.sh), doc/http2_sig.md §4.2.
 

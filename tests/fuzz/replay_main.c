@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * Runs a libFuzzer target without libFuzzer: every file in the directory given as the only argument is passed to
  * LLVMFuzzerTestOneInput() in a buffer of exactly its size. tests/test_fuzz.py replays each corpus this way under
  * valgrind.

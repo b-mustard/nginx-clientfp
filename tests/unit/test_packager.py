@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """The packager's debian/ files: the changelog names the distribution the package is built for (decision 041)."""
 
 from __future__ import annotations

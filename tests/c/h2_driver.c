@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * Test driver for nginx_module/src/clientfp_h2.c.
  *
  * stdin: hook events as nginx's patched HTTP/2 code reports them, one per line, a connection per block:

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+#
 # memcheck suppressions for nginx itself, used when the valgrind build runs under memcheck
 # (tests/integration/conftest.py). Each entry is a block nginx allocates once per worker process and, by design,
 # never frees: the process exits. A worker ends with the cycle pool destroyed, so the pointers to these blocks

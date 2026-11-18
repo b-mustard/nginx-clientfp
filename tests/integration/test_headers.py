@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """clientfp_request_header (gs7, decisions 004/013/016): signatures reach the upstream as headers, and client-sent
 copies are always removed. Upstream = examples/echo_server.py, which echoes the headers it received. The traffic
 tests run against the package, the ASan build and the valgrind build under memcheck (`srv`)."""

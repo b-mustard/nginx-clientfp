@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Impossible and malicious input against a running nginx (t3).
 
 Every test runs against the installed package and, when they have been built, against the ASan/UBSan build and the

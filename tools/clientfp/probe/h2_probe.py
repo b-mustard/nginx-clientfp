@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Raw HTTP/2 probe: sends hand-crafted client frame sequences (SETTINGS / WINDOW_UPDATE / PRIORITY / HEADERS in an
 exact order with exact values) and compares the fingerprint the server reports with the expected one.
 

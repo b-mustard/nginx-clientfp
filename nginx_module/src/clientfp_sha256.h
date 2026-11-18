@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * SHA-256 (FIPS 180-4), streaming. Pure C, no nginx or TLS-library dependency (decision 030).
  * Used by the JA4 and TLSFP cores; checked against Python's hashlib in tests/test_c_core.py.
  */

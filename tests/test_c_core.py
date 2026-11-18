@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """The nginx module's pure-C cores (nginx_module/src/clientfp_*.c), checked against the Python reference
 implementations (t1, t3). Every test runs twice in the nginx-clientfp-ctest image: with drivers built with ASan + UBSan
 (-O1), and with drivers built without sanitizers (-O2, as the package is) run under valgrind's memcheck, which also

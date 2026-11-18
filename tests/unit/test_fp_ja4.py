@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """clientfp.fp.ja4 against doc/ja4_sig.md: worked examples, ALPN table, the 81 recorded vectors, malformed input."""
 
 from __future__ import annotations

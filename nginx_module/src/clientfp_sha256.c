@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * SHA-256 (FIPS 180-4 §6.2), streaming. See clientfp_sha256.h.
  */
 

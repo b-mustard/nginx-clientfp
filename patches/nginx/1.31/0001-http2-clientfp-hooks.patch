@@ -1,3 +1,6 @@
+SPDX-License-Identifier: BSD-2-Clause
+Copyright (c) 2026 nginx-clientfp contributors
+
 diff --git a/src/http/v2/ngx_http_v2.c b/src/http/v2/ngx_http_v2.c
 index 35683ab..3944d07 100644
 --- a/src/http/v2/ngx_http_v2.c

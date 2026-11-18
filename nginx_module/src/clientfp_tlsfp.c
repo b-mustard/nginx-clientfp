@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * nDPI TLS client fingerprint (TLSFP). See clientfp_tlsfp.h and doc/tlsfp_sig.md.
  *
  * Rules, as in tools/clientfp/fp/tlsfp.py (spec section, decision):

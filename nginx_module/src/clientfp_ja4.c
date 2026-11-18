@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * JA4 TLS client fingerprint: ClientHello parser and formatter. See clientfp_ja4.h and doc/ja4_sig.md.
  *
  * Parsing rules (the TLS presentation language of RFC 8446 §3, as in the reference tools/clientfp/fp/ja4.py):

@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * Akamai HTTP/2 client fingerprint: per-connection recorder and formatter.
  *
  * Pure C, no nginx dependency. The patched nginx HTTP/2 state machine reports frames through the

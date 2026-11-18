@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Correctness of the fingerprints nginx computes (t1), with real clients and crafted traffic:
 
 - JA4 and TLSFP: every case of clientfp-ja4-probe (curl, wget, urllib, httpx, niquests, curl_cffi browser

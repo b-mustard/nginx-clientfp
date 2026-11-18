@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Reference for the module's ClientHello capture (nginx_module/src/clientfp_hello.c, decisions 030 and 033).
 
 The module reassembles the first handshake message of a connection itself, before the TLS library reads anything:

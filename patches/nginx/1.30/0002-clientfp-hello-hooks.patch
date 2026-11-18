@@ -1,3 +1,6 @@
+SPDX-License-Identifier: BSD-2-Clause
+Copyright (c) 2026 nginx-clientfp contributors
+
 diff --git a/src/event/quic/ngx_event_quic.h b/src/event/quic/ngx_event_quic.h
 index 4f899ec..717f50f 100644
 --- a/src/event/quic/ngx_event_quic.h

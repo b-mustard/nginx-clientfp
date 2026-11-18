@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * nDPI TLS client fingerprint (TLSFP): ClientHello -> fingerprint string.
  *
  * Pure C, no nginx or TLS-library dependency, independent of the JA4 core (decision 022). SHA-256 comes from

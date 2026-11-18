@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """JA4 (TLS client) fingerprint: reference implementation of doc/ja4_sig.md.
 
 Upstream definition: FoxIO's JA4.md,

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """clientfp.fp.h2 against doc/http2_sig.md: §4.1 vectors, the 21 probe cases, bounds, partial and malformed input."""
 
 from __future__ import annotations

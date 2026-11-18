@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * Test driver for nginx_module/src/clientfp_sha256.c.
  *
  * stdin: one input per line as "<chunk>:<hex>"; the input is fed in pieces of <chunk> bytes (1..n).

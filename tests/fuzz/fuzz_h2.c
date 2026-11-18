@@ -1,4 +1,9 @@
-/* libFuzzer target: arbitrary bytes as a sequence of HTTP/2 hook events, then format. */
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
+ * libFuzzer target: arbitrary bytes as a sequence of HTTP/2 hook events, then format.
+ */
 
 #include <stdlib.h>
 #include <string.h>

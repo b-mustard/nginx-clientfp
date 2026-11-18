@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+#
 # Single entry point (gs1): creates/updates .venv, then runs the Python tooling.
 #
 #   ./build.sh                                   build .deb for this distro, all flavors (native)

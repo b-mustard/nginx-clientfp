@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Shared pytest options and helpers.
 
 Markers (pyproject.toml): nginx (needs a built .deb, ASan or valgrind binary), docker, network, slow.

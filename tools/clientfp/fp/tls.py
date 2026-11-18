@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """TLS ClientHello framing shared by the fingerprint calculators (ja4.py, tlsfp.py). No fingerprint logic here.
 
 Input is the ClientHello *handshake message* (msg_type 0x01, 3-byte length, body), as the module's capture reassembles

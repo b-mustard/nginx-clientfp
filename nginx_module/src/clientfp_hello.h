@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * ClientHello capture: reassembles the first handshake message of a connection from what the client sent,
  * before the TLS library reads it (decision 030). Pure C, no nginx or TLS-library dependency.
  *

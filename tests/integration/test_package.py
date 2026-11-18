@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """The installed package (gs6, gs10): files, configuration, the distro's TLS library, module present."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """libFuzzer runs of the module's C cores (t3): tests/fuzz/fuzz_{ja4,h2,tlsfp,hello}.c with ASan + UBSan, seeded with
 every recorded ClientHello (as a message, as TLS records, as QUIC CRYPTO fragments) and a few HTTP/2 event streams.
 `--fuzz-seconds` per target (default 60).

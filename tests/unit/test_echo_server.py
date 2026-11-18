@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """examples/echo_server.py: malformed requests get 400 without an exception in the server, the log shows binary data
 as escapes, and the server's address agrees with examples/nginx-echo.conf."""
 

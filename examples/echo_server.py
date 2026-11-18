@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Echo the client fingerprints that nginx-clientfp passes to an upstream.
 
 nginx terminates TLS / HTTP/2 / HTTP/3, computes the signatures and adds them as request headers

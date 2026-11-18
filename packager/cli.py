@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Command line: `./build.sh <command>` (build.sh runs `python -m packager`)."""
 
 from __future__ import annotations

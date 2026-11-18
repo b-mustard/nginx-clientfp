@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * JA4 TLS client fingerprint: ClientHello parser and formatter.
  *
  * Pure C, no nginx or TLS-library dependency, so it can be unit-tested and fuzzed on its own. SHA-256 comes from

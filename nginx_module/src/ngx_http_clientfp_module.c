@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 nginx-clientfp contributors
+ *
  * ngx_http_clientfp_module: JA4, nDPI TLSFP and HTTP/2 (Akamai) client fingerprints for nginx.
  *
  * Directives

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 nginx-clientfp contributors
+
 """Akamai HTTP/2 client fingerprint: reference calculator for doc/http2_sig.md §2-§3.
 
 Input is what the client sends after TLS (or on a cleartext h2c connection): the 24-octet client preface followed
