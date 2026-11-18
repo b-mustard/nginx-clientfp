@@ -5,6 +5,8 @@
 
 Details of decisions 030, 033, 034 and 036 that needed no human choice.
 
+The connection is no longer marked reusable while it waits: decision 038 replaces that detail.
+
 ## TCP wait
 - The hook runs in `ngx_http_ssl_handshake()` right after nginx's own 1-byte peek (and after a PROXY protocol
   header has been consumed), before the TLS connection is created. `NGX_AGAIN` reuses nginx's own waiting code:

@@ -226,7 +226,8 @@ handshake message (the layout of [§2](#2-values-to-extract-from-the-clienthello
   connection. The module peeks at the socket (`MSG_PEEK`), so the TLS library later reads the same bytes, and walks
   the handshake records (content type 22, version major 3, length 0–16384; empty records are skipped, as the TLS
   library skips them). A ClientHello split over several records is joined. While it is incomplete the module
-  returns `NGX_AGAIN` and nginx waits for more data, under `client_header_timeout`. The capture computes a lower
+  returns `NGX_AGAIN` and nginx waits for more data, under `client_header_timeout`; as during the handshake, the
+  connection is not one nginx closes to make room for others (decision 038). The capture computes a lower
   bound on the bytes still needed, and `FIONREAD` avoids copying again before they are there. It gives up after
   64 peeks or when the client closes its side; the handshake then goes on without a fingerprint.
 - **QUIC.** `ngx_quic_handle_crypto_frame()` calls `ngx_http_clientfp_quic_crypto()` for every CRYPTO frame of an

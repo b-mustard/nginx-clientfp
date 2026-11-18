@@ -101,8 +101,9 @@ spoof these headers.
   - TLS over TCP: a hook in `ngx_http_ssl_handshake()` (`patches/nginx/<line>/0002-*`) runs before the TLS
     library reads anything. The module peeks at the socket (`MSG_PEEK`, so the TLS library later reads the same
     bytes) and reassembles the ClientHello from its handshake records. While it is incomplete the connection waits
-    for more data under `client_header_timeout`; `FIONREAD` avoids copying until the bytes still needed have
-    arrived. It gives up (no fingerprint, the handshake goes on) after 64 peeks or when the client closes its side.
+    for more data under `client_header_timeout`, and, as during the handshake, nginx does not close it to make room
+    for other connections. `FIONREAD` avoids copying until the bytes still needed have arrived. It gives up (no
+    fingerprint, the handshake goes on) after 64 peeks or when the client closes its side.
     An SSLv2-format ClientHello is recognised from its first three bytes and refused or passed on as set by
     `clientfp_refuse_sslv2_hello`.
   - QUIC: a hook in `ngx_quic_handle_crypto_frame()` passes the CRYPTO frames of Initial packets, in any order
