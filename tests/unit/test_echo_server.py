@@ -1,17 +1,23 @@
-"""examples/echo_server.py answers malformed requests with 400 and logs them, without an exception in the server."""
+"""examples/echo_server.py: malformed requests get 400 without an exception in the server, the log shows binary data
+as escapes, and the server's address agrees with examples/nginx-echo.conf."""
 
 from __future__ import annotations
 
+import re
 import socket
 import sys
 import threading
 from collections.abc import Iterator
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+import examples.echo_server as echo
 from examples.echo_server import EchoHandler
+
+REPO = Path(__file__).resolve().parents[2]
 
 
 class RecordingServer(ThreadingHTTPServer):
@@ -69,3 +75,32 @@ def test_request_is_echoed(server: RecordingServer) -> None:
     assert reply.startswith(b"HTTP/1.0 200")
     assert b'"X-Client-JA4": "t13d0000h2_a_b"' in reply
     assert server.errors == []
+
+
+@pytest.mark.parametrize("request_bytes", [
+    b"GET /\x1b[2J\x1b[31mred HTTP/1.1\r\nHost: x\r\n\r\n",          # terminal escape sequences in the path
+    b"GET / HTTP/\xba\x13\x07\r\n\r\n",                           # binary in the version
+], ids=["escape-sequence", "binary-version"])
+def test_log_shows_binary_as_escapes(server: RecordingServer, request_bytes: bytes,
+                                     capsys: pytest.CaptureFixture[str]) -> None:
+    exchange(server, request_bytes)
+    out = capsys.readouterr().out
+    assert out
+    bad = sorted({c for c in out if not (" " <= c <= "~" or c == "\n")})
+    assert not bad, f"unescaped characters in the log: {bad!r}"
+    assert "\\x1b" in out or "\\xba" in out
+
+
+def test_address_agrees_with_nginx_conf() -> None:
+    """The server takes no options: its address is the proxy_pass target of the example site, and the address it
+    prints is the port nginx listens on."""
+    conf = (REPO / "examples" / "nginx-echo.conf").read_text()
+    upstream = re.findall(r"proxy_pass http://([\d.]+):(\d+);", conf)
+    assert upstream == [(echo.LISTEN[0], str(echo.LISTEN[1]))]
+    assert set(re.findall(r"listen (\d+) ssl;", conf)) == {str(echo.NGINX_PORT)}
+
+
+def test_banner_names_nginx_not_the_echo_server() -> None:
+    text = echo.banner()
+    assert f"https://localhost:{echo.NGINX_PORT}/" in text
+    assert str(echo.LISTEN[1]) not in text
