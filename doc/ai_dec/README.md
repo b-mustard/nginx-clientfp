@@ -41,3 +41,4 @@ Every engineering decision, automatic or human (workflow rule h2), gets one file
 | 035 | [HTTP/3 on every target](decision_035.md) | human |
 | 036 | [SSLv2-format ClientHellos: no fingerprint, refused by default](decision_036.md) | human |
 | 037 | [ClientHello capture: implementation details](decision_037.md) | automatic |
+| 038 | [A connection waiting for its ClientHello is not reusable](decision_038.md) | human |
