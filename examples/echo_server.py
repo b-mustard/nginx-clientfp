@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import argparse
 import json
+from email.message import Message
+from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 FINGERPRINT_HEADERS = (
@@ -57,13 +59,20 @@ class EchoHandler(BaseHTTPRequestHandler):
         self._answer()
 
     def do_POST(self) -> None:  # noqa: N802
-        length = int(self.headers.get("Content-Length") or 0)
+        value = self.headers.get("Content-Length") or "0"
+        length = int(value) if value.isdigit() else -1
+        if length < 0:
+            self.send_error(HTTPStatus.BAD_REQUEST, "Bad Content-Length")
+            return
         if length:
             self.rfile.read(min(length, 1 << 20))
         self._answer()
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002 (base class signature)
-        ja4 = self.headers.get("X-Client-JA4", "-") if self.headers else "-"
+        # http.server logs a request that it cannot parse before it sets self.headers. The type stubs declare the
+        # attribute on every handler, so mypy does not see that it can be missing.
+        headers: Message | None = getattr(self, "headers", None)
+        ja4 = headers.get("X-Client-JA4", "-") if headers is not None else "-"
         print(f"{self.address_string()} {format % args} ja4={ja4}", flush=True)
 
 
