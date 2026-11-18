@@ -60,19 +60,21 @@ CONFIGURE_ARGS = [
     "--with-stream_realip_module",
 ]
 
-def substitutions(v: Versions) -> dict[str, str]:
+def substitutions(v: Versions, distribution: str) -> dict[str, str]:
     epoch = int(os.environ.get("SOURCE_DATE_EPOCH", time.time()))
     return {
         "@DEB_VERSION@": v.deb_version,
+        "@DISTRIBUTION@": distribution,
         "@NGINX_VERSION@": v.nginx,
         "@DATE@": email.utils.formatdate(epoch, localtime=False),
         "@CONFIGURE_ARGS@": " \\\n\t\t".join(CONFIGURE_ARGS),
     }
 
 
-def render(dest: Path, v: Versions) -> None:
+def render(dest: Path, v: Versions, distribution: str) -> None:
+    """debian/ from the templates; `distribution` is the changelog's distribution field (decision 041)."""
     shutil.copytree(TEMPLATES, dest, ignore=shutil.ignore_patterns("__pycache__"))
-    subs = substitutions(v)
+    subs = substitutions(v, distribution)
     for tpl in sorted(dest.rglob("*.in")):
         text = tpl.read_text()
         for key, value in subs.items():

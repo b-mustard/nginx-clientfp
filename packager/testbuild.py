@@ -58,7 +58,7 @@ def out_dir(kind: str, v: Versions) -> Path:
 
 def build(kind: str, v: Versions, jobs: int, target_name: str = "ubuntu-24.04") -> Path:
     target = TARGETS[target_name]
-    root = tree.prepare(f"{kind}-src", v)
+    root = tree.prepare(f"{kind}-src", v, "UNRELEASED")   # no package is made from a test build
     out = out_dir(kind, v)
     rel_root = root.relative_to(REPO)
     rel_out = out.relative_to(REPO)

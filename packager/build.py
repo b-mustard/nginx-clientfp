@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from . import tree, verify
-from .model import TARGETS, Target, Versions
+from .model import TARGETS, Target, Versions, distribution
 from .util import REPO, BuildError, log, run, which
 
 DIST = REPO / "dist"
@@ -118,7 +118,7 @@ def package_in_docker(target: Target, tree_root: Path, jobs: int, lintian: bool)
 
 def build(target_name: str, v: Versions, *, native: bool, jobs: int, lintian: bool = True) -> Path:
     """Prepare the tree and produce dist/<target>/<deb>. Returns the .deb path."""
-    root = tree.prepare(target_name, v)
+    root = tree.prepare(target_name, v, distribution(target_name))
     write_meta(root, v)
     if native:
         package(root, target_name, jobs, lintian)

@@ -39,6 +39,7 @@ class Target:
 
     name: str  # "ubuntu-24.04", also the dist/ subdirectory (decision 003)
     image: str  # docker base image
+    codename: str  # VERSION_CODENAME in the image's /etc/os-release: the changelog distribution (decision 041)
 
     @property
     def build_image(self) -> str:
@@ -48,22 +49,41 @@ class Target:
 TARGETS: dict[str, Target] = {
     t.name: t
     for t in (
-        Target("ubuntu-24.04", "ubuntu:24.04"),
-        Target("ubuntu-26.04", "ubuntu:26.04"),
-        Target("debian-12", "debian:12"),
-        Target("debian-13", "debian:13"),
+        Target("ubuntu-24.04", "ubuntu:24.04", "noble"),
+        Target("ubuntu-26.04", "ubuntu:26.04", "resolute"),
+        Target("debian-12", "debian:12", "bookworm"),
+        Target("debian-13", "debian:13", "trixie"),
     )
 }
 
 
-def native_target_name(os_release: Path = Path("/etc/os-release")) -> str:
-    """'<ID>-<VERSION_ID>' of the running system, e.g. 'ubuntu-24.04'."""
+OS_RELEASE = Path("/etc/os-release")
+
+
+def os_release_fields(os_release: Path = OS_RELEASE) -> dict[str, str]:
     fields: dict[str, str] = {}
     for line in os_release.read_text().splitlines():
         key, sep, value = line.partition("=")
         if sep:
             fields[key] = value.strip().strip('"')
+    return fields
+
+
+def native_target_name(os_release: Path = OS_RELEASE) -> str:
+    """'<ID>-<VERSION_ID>' of the running system, e.g. 'ubuntu-24.04'."""
+    fields = os_release_fields(os_release)
     return f"{fields.get('ID', 'unknown')}-{fields.get('VERSION_ID', 'unknown')}"
+
+
+def distribution(target_name: str, os_release: Path = OS_RELEASE) -> str:
+    """The distribution field of debian/changelog: the codename of the target (decision 041). A native build on
+    a distro that is not in TARGETS takes it from the running system."""
+    if target_name in TARGETS:
+        return TARGETS[target_name].codename
+    codename = os_release_fields(os_release).get("VERSION_CODENAME", "")
+    if not codename:
+        raise ValueError(f"{os_release} has no VERSION_CODENAME: no distribution for the changelog of {target_name}")
+    return codename
 
 
 @dataclass(frozen=True)

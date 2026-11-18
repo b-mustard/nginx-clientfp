@@ -44,8 +44,9 @@ def apply_patches(component: str, series: str, dest: Path) -> None:
             raise BuildError(f"{patch.name} is not applied to {dest} after git apply")
 
 
-def prepare(target_name: str, v: Versions) -> Path:
-    """Create a fresh tree (an existing one is removed) and return its path."""
+def prepare(target_name: str, v: Versions, distribution: str) -> Path:
+    """Create a fresh tree (an existing one is removed) and return its path. `distribution` goes into
+    debian/changelog."""
     root = tree_dir(target_name, v)
     if root.parent.exists():
         shutil.rmtree(root.parent)
@@ -58,5 +59,5 @@ def prepare(target_name: str, v: Versions) -> Path:
     apply_patches("nginx", v.flavor.nginx_series, root / "nginx")
 
     shutil.copytree(MODULE, root / "clientfp", ignore=shutil.ignore_patterns("tests", "*.o", "*.a"))
-    debian.render(root / "debian", v)
+    debian.render(root / "debian", v, distribution)
     return root

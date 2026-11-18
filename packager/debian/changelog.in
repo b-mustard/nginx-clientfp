@@ -1,4 +1,4 @@
-nginx-clientfp (@DEB_VERSION@) unstable; urgency=medium
+nginx-clientfp (@DEB_VERSION@) @DISTRIBUTION@; urgency=medium
 
   * nginx @NGINX_VERSION@ with ngx_http_clientfp_module.
 
