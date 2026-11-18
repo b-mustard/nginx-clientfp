@@ -3,14 +3,14 @@ nginx of its own with the settings under test.
 
 - A level-triggered event method (`use poll`, `use select`) gives no new event while the peeked bytes stay queued,
   so the module does not wait there. A hello that has arrived whole is fingerprinted, one still arriving is not,
-  and the worker never spins. The package is built with epoll only, so these run against the ASan build alone,
-  which has the poll and select modules for them.
+  and the worker never spins. The package is built with epoll only, so these run against the ASan and valgrind
+  builds alone, which have the poll and select modules for them (decision 039).
 - A connection waiting for the rest of its hello is not reusable (decision 038). When the worker runs short of
   connections, nginx closes idle connections to make room, but not that one.
 - New bytes do not restart `client_header_timeout`, so a hello sent a byte at a time is closed when it expires.
 
-As in test_hostile, the other tests run against the package and the ASan build. Afterwards the server must still
-answer and must have no crashed worker and no sanitizer report.
+As in test_hostile, the other tests run against the package, the ASan build and the valgrind build under memcheck.
+Afterwards the server must still answer and must have no crashed worker, sanitizer report or memcheck error.
 """
 
 from __future__ import annotations
@@ -22,13 +22,11 @@ from collections.abc import Iterator
 
 import pytest
 
-from .conftest import Nginx, custom_nginx, nginx_conf
-from .test_hostile import assert_healthy, mark_logs
+from .conftest import SERVER_KINDS, Nginx, assert_healthy, custom_nginx, mark_logs, nginx_conf
 from .tlsclient import BioClient
 
 pytestmark = [pytest.mark.nginx, pytest.mark.docker]
 
-KINDS = ["pkg", "asan"]
 HEADER_TIMEOUT = 10   # client_header_timeout of the small server, in seconds
 
 
@@ -39,9 +37,13 @@ def _checked(n: Nginx) -> Iterator[Nginx]:
 
 
 def worker_cpu(n: Nginx) -> float:
-    """CPU seconds used so far by the server's only worker process."""
-    out = n.exec("sh", "-c", "getconf CLK_TCK; for p in /proc/[0-9]*; do "
-                 "tr '\\0' ' ' < $p/cmdline 2>/dev/null | grep -q '^nginx: worker process' && cat $p/stat; done; true")
+    """CPU seconds used so far by the server's only worker process: the master's child with the master's process
+    name (not the echo upstream, which the master inherits when it is PID 1). The process title cannot be used:
+    under valgrind, /proc/<pid>/cmdline shows valgrind's command line."""
+    out = n.exec("sh", "-c", "m=$(cat /tmp/nginx.pid); c=$(cat /proc/$m/stat); c=${c#*(}; c=${c%%)*}; "
+                 "getconf CLK_TCK; for p in /proc/[0-9]*; do s=$(cat $p/stat 2>/dev/null) || continue; "
+                 "n=${s#*(}; n=${n%%)*}; set -- ${s##*) }; "
+                 "[ \"$2\" = \"$m\" ] && [ \"$n\" = \"$c\" ] && echo \"$s\"; done; true")
     tick, *rest = out.splitlines()
     stats = [s for s in rest if s.strip()]
     assert len(stats) == 1, out
@@ -51,10 +53,12 @@ def worker_cpu(n: Nginx) -> float:
 
 # ------------------------------------------------------------------------------- level-triggered event methods
 
-@pytest.fixture(scope="module", params=["poll", "select"], ids=lambda m: f"asan-{m}")
+@pytest.fixture(scope="module", params=[(k, m) for k in ("asan", "valgrind") for m in ("poll", "select")],
+                ids=lambda p: f"{p[0]}-{p[1]}")
 def level_server(request: pytest.FixtureRequest) -> Iterator[Nginx]:
-    conf = nginx_conf(events=f"use {request.param}; worker_connections 512;", workers=1)
-    with custom_nginx(request, "asan", conf) as n:
+    kind, method = request.param
+    conf = nginx_conf(events=f"use {method}; worker_connections 512;", workers=1)
+    with custom_nginx(request, kind, conf) as n:
         yield n
 
 
@@ -96,7 +100,7 @@ def test_level_triggered_stalled_hello_does_not_spin(level: Nginx) -> None:
 
 # ----------------------------------------------------------- a worker short of connections, client_header_timeout
 
-@pytest.fixture(scope="module", params=KINDS)
+@pytest.fixture(scope="module", params=SERVER_KINDS)
 def small_server(request: pytest.FixtureRequest) -> Iterator[Nginx]:
     conf = nginx_conf(events="worker_connections 32;", workers=1, http=f"client_header_timeout {HEADER_TIMEOUT}s;")
     with custom_nginx(request, request.param, conf) as n:

@@ -6,7 +6,14 @@ clientfp-test.conf and the examples/ echo upstream on 127.0.0.1:8081.
 
 `nginx_asan`: the ASan/UBSan nginx from `./build.sh asan` (build/asan/<flavor>/), same site, in the build image.
 
-`custom_nginx()`: either of them with an nginx.conf of the test's own (`nginx_conf()`), in a container of its own.
+`nginx_valgrind`: the nginx from `./build.sh valgrind` (build/valgrind/<flavor>/) under valgrind's memcheck, same
+site, in the build image. When the session ends it is stopped gracefully, so every process exits and memcheck reports
+what it leaked; any memcheck output fails the session.
+
+`srv`: each of the three in turn, checked after every test (still answering, no crashed worker, no sanitizer or
+memcheck report).
+
+`custom_nginx()`: any of them with an nginx.conf of the test's own (`nginx_conf()`), in a container of its own.
 
 Ports are published on 127.0.0.1 with the same host port for TCP and UDP (QUIC).
 """
@@ -32,7 +39,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from ..conftest import REPO
+from ..conftest import REPO, VALGRIND
 
 HERE = Path(__file__).resolve().parent
 TARGET_IMAGES = {
@@ -51,6 +58,7 @@ class Nginx:
     tls_alt: int      # 8444: server with its own clientfp_request_header list
     workdir: Path
     logs: str         # error log files inside the container (shell words)
+    patience: float = 0   # seconds alive() waits for a slow server (the valgrind build) to catch up
 
     def exec(self, *cmd: str, check: bool = True) -> str:
         proc = subprocess.run(["docker", "exec", self.container, *cmd], capture_output=True, text=True,
@@ -74,12 +82,21 @@ class Nginx:
         return self.exec("sh", "-c", "; ".join(f"tail -c +{m + 1} {f} 2>/dev/null" for f, m in zip(files, offsets)),
                          check=False)
 
-    def alive(self) -> bool:
+    def answers(self) -> bool:
         try:
             get(self.tls, "/fp")
             return True
         except OSError:
             return False
+
+    def alive(self) -> bool:
+        """Answers /fp, within `patience` seconds."""
+        deadline = time.monotonic() + self.patience
+        while not self.answers():
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(1)
+        return True
 
 
 def get(port: int, path: str, headers: dict[str, str] | None = None, host: str = "localhost") -> str:
@@ -134,14 +151,15 @@ def _cert(dest: Path) -> None:
 def _wait_ready(n: Nginx, timeout: float = 60) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if n.alive():
+        if n.answers():
             return
         time.sleep(0.5)
     logs = subprocess.run(["docker", "logs", n.container], capture_output=True, text=True, check=False)
     raise AssertionError(f"nginx did not come up:\n{logs.stdout[-3000:]}\n{logs.stderr[-3000:]}")
 
 
-def _start(image: str, mounts: list[str], script: str, tmp: Path, logs: str) -> Generator[Nginx, None, None]:
+def _start(image: str, mounts: list[str], script: str, tmp: Path, logs: str,
+           patience: float = 0) -> Generator[Nginx, None, None]:
     name = f"clientfp-test-{uuid.uuid4().hex[:8]}"
     tls, h2c, alt = _free_port(), _free_port(), _free_port()
     cmd = ["docker", "run", "-d", "--name", name,
@@ -150,7 +168,7 @@ def _start(image: str, mounts: list[str], script: str, tmp: Path, logs: str) -> 
            "-v", f"{tmp}:/etc/nginx/test:ro", "-v", f"{REPO / 'examples'}:/examples:ro",
            *mounts, image, "sh", "-c", script]
     subprocess.run(cmd, check=True, capture_output=True)
-    n = Nginx(name, tls, h2c, alt, tmp, logs)
+    n = Nginx(name, tls, h2c, alt, tmp, logs, patience)
     try:
         _wait_ready(n)
         yield n
@@ -236,32 +254,70 @@ http {{
 """
 
 
+SERVER_KINDS = ["pkg", "asan", "valgrind"]
+TEST_BUILD_IMAGE = "nginx-clientfp-build:ubuntu-24.04"
+MEMCHECK_LINE = re.compile(r"^==\d+== ", re.M)
+
+
+def _test_build(request: pytest.FixtureRequest, kind: str) -> str:
+    """The flavor of the ./build.sh <kind> nginx to run; skips the test when there is none."""
+    request.getfixturevalue("require_docker")
+    flavor = str(request.getfixturevalue("flavor"))
+    prefix = REPO / "build" / kind / flavor
+    if not (prefix / "sbin" / "nginx").exists():
+        pytest.skip(f"no {kind} build in {prefix} (run ./build.sh {kind} --flavor {flavor})")
+    return flavor
+
+
+def _stop_under_memcheck(n: Nginx) -> str:
+    """Stop nginx gracefully so that every process exits and memcheck reports its leaks; return what memcheck
+    printed during the whole run, or why it could not be collected."""
+    n.exec("sh", "-c", "kill -QUIT $(cat /tmp/nginx.pid)", check=False)
+    deadline = time.monotonic() + 120
+    while not n.exec("sh", "-c", "test -e /tmp/nginx.exited && echo exited", check=False).strip():
+        if time.monotonic() > deadline:
+            return "nginx did not exit within 120 s of SIGQUIT"
+        time.sleep(1)
+    out = n.exec("sh", "-c", "cat /tmp/nginx.stderr /tmp/error.log 2>/dev/null", check=False)
+    (REPO / "build" / "test-logs").mkdir(parents=True, exist_ok=True)
+    (REPO / "build" / "test-logs" / f"{n.container}-valgrind.log").write_text(out)
+    return "\n".join(line for line in out.splitlines() if MEMCHECK_LINE.match(line))
+
+
 @contextmanager
 def custom_nginx(request: pytest.FixtureRequest, kind: str, conf: str) -> Iterator[Nginx]:
-    """The installed package (`kind` "pkg") or the ASan build ("asan") running `conf`, in a container of its own.
-    The ASan build's sanitizer reports are kept in build/test-logs/."""
+    """The installed package (`kind` "pkg"), the ASan build ("asan") or the valgrind build under memcheck
+    ("valgrind") running `conf`, in a container of its own. The ASan build's sanitizer reports and the valgrind
+    build's full log are kept in build/test-logs/. The valgrind build is stopped gracefully at the end, and any
+    memcheck output, leaks included, fails the test or fixture that owns it."""
     tmp = request.getfixturevalue("tmp_path_factory").mktemp(f"nginx-{kind}")
     _cert(tmp)
     (tmp / "nginx.conf").write_text(conf)
+    args = "-p /tmp/ -c /etc/nginx/test/nginx.conf 2> /tmp/nginx.stderr"
     if kind == "pkg":
         image = str(request.getfixturevalue("runtime_image"))
         mounts = ["-v", f"{request.getfixturevalue('deb')}:/pkg/nginx-clientfp.deb:ro"]
-        script = INSTALL_DEB + ECHO_UPSTREAM + "exec nginx -c /etc/nginx/test/nginx.conf 2> /tmp/nginx.stderr"
-    else:
-        request.getfixturevalue("require_docker")
-        flavor = str(request.getfixturevalue("flavor"))
-        prefix = REPO / "build" / "asan" / flavor
-        if not (prefix / "sbin" / "nginx").exists():
-            pytest.skip(f"no ASan build in {prefix} (run ./build.sh asan --flavor {flavor})")
-        image = "nginx-clientfp-build:ubuntu-24.04"
-        mounts = ["-v", f"{REPO}:/work:ro"]
+        script = INSTALL_DEB + ECHO_UPSTREAM + f"exec nginx {args}"
+    elif kind == "asan":
+        flavor = _test_build(request, kind)
+        image, mounts = TEST_BUILD_IMAGE, ["-v", f"{REPO}:/work:ro"]
         script = (
             ECHO_UPSTREAM + "ASAN_OPTIONS=detect_leaks=0:abort_on_error=0:log_path=/tmp/asan "
             "UBSAN_OPTIONS=print_stacktrace=1:log_path=/tmp/ubsan "
-            f"exec /work/build/asan/{flavor}/sbin/nginx -p /tmp/ -c /etc/nginx/test/nginx.conf 2> /tmp/nginx.stderr"
+            f"exec /work/build/asan/{flavor}/sbin/nginx {args}"
         )
-    container = _start(image, mounts, script, tmp, "/tmp/error.log /tmp/nginx.stderr")
+    else:
+        flavor = _test_build(request, kind)
+        image, mounts = TEST_BUILD_IMAGE, ["-v", f"{REPO}:/work:ro"]
+        # the shell stays, so that the logs can still be read once nginx has exited
+        valgrind = " ".join(VALGRIND) + " --suppressions=/work/tests/valgrind/nginx.supp"
+        script = (ECHO_UPSTREAM + f"{valgrind} /work/build/valgrind/{flavor}/sbin/nginx {args}; "
+                  "touch /tmp/nginx.exited; exec sleep infinity")
+    # under memcheck, a flood of handshakes takes the server a while to work through
+    patience = 120 if kind == "valgrind" else 0
+    container = _start(image, mounts, script, tmp, "/tmp/error.log /tmp/nginx.stderr", patience)
     n = next(container)
+    memcheck = ""
     try:
         yield n
     finally:
@@ -269,13 +325,47 @@ def custom_nginx(request: pytest.FixtureRequest, kind: str, conf: str) -> Iterat
             report = n.exec("sh", "-c", "cat /tmp/asan* /tmp/ubsan* /tmp/error.log 2>/dev/null", check=False)
             (REPO / "build" / "test-logs").mkdir(parents=True, exist_ok=True)
             (REPO / "build" / "test-logs" / f"{n.container}-asan.log").write_text(report)
+        if kind == "valgrind":
+            memcheck = _stop_under_memcheck(n)
         container.close()   # saves the error log and removes the container
+    assert not memcheck, f"memcheck ({n.container}):\n{memcheck[-6000:]}"
 
 
 @pytest.fixture(scope="session")
 def nginx_asan(request: pytest.FixtureRequest) -> Iterator[Nginx]:
     with custom_nginx(request, "asan", nginx_conf()) as n:
         yield n
+
+
+@pytest.fixture(scope="session")
+def nginx_valgrind(request: pytest.FixtureRequest) -> Iterator[Nginx]:
+    with custom_nginx(request, "valgrind", nginx_conf()) as n:
+        yield n
+
+
+def mark_logs(n: Nginx) -> list[int]:
+    """Set earlier sanitizer reports aside and return the error logs' current sizes, so a test is judged only by what
+    happens during it (a crashed worker is replaced by the master, later tests stay meaningful)."""
+    n.exec("sh", "-c", "mkdir -p /tmp/seen; mv /tmp/asan.* /tmp/ubsan.* /tmp/seen/ 2>/dev/null; true", check=False)
+    return n.log_mark()
+
+
+def assert_healthy(n: Nginx, mark: list[int] | None = None) -> None:
+    """Still answering; no crashed worker, sanitizer report or memcheck error since `mark`."""
+    assert n.alive(), "nginx stopped answering"
+    report = n.exec("sh", "-c", "cat /tmp/asan.* /tmp/ubsan.* 2>/dev/null", check=False)
+    crash = re.compile(r"exited on signal|runtime error|AddressSanitizer")
+    report += "".join(line + "\n" for line in n.log_since(mark).splitlines()
+                      if crash.search(line) or MEMCHECK_LINE.match(line))
+    assert report.strip() == "", report[-6000:]
+
+
+@pytest.fixture(params=SERVER_KINDS)
+def srv(request: pytest.FixtureRequest) -> Iterator[Nginx]:
+    n: Nginx = request.getfixturevalue(f"nginx_{request.param}")
+    mark = mark_logs(n)
+    yield n
+    assert_healthy(n, mark)
 
 
 def fp_json(port: int) -> dict[str, str]:

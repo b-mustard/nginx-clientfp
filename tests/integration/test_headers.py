@@ -1,5 +1,6 @@
 """clientfp_request_header (gs7, decisions 004/013/016): signatures reach the upstream as headers, and client-sent
-copies are always removed. Upstream = examples/echo_server.py, which echoes the headers it received."""
+copies are always removed. Upstream = examples/echo_server.py, which echoes the headers it received. The traffic
+tests run against the package, the ASan build and the valgrind build under memcheck (`srv`)."""
 
 from __future__ import annotations
 
@@ -25,30 +26,30 @@ def _headers(echo: dict[str, object], name: str) -> list[str]:
     return [v for k, v in pairs if k.lower() == name.lower()]
 
 
-def test_injected_over_http1(nginx_pkg: Nginx) -> None:
-    echo = _echo(nginx_pkg.tls)
-    fp = fp_json(nginx_pkg.tls)
+def test_injected_over_http1(srv: Nginx) -> None:
+    echo = _echo(srv.tls)
+    fp = fp_json(srv.tls)
     assert _headers(echo, "X-Client-JA4") == [fp["ja4"]]
     assert _headers(echo, "X-Client-TLSFP") == [fp["tlsfp"]] and len(fp["tlsfp"]) == 49
     assert _headers(echo, "X-Client-HTTP2-FP") == []        # HTTP/1.1: empty value, header not added
 
 
-def test_spoofed_headers_removed(nginx_pkg: Nginx) -> None:
-    echo = _echo(nginx_pkg.tls, {"X-Client-JA4": "spoofed", "x-client-ja4": "spoofed2",
+def test_spoofed_headers_removed(srv: Nginx) -> None:
+    echo = _echo(srv.tls, {"X-Client-JA4": "spoofed", "x-client-ja4": "spoofed2",
                                  "X-CLIENT-HTTP2-FP": "1:1|00|0|m", "x-client-tlsfp": "spoofed3", "X-Other": "kept"})
-    fp = fp_json(nginx_pkg.tls)
+    fp = fp_json(srv.tls)
     assert _headers(echo, "X-Client-JA4") == [fp["ja4"]]
     assert _headers(echo, "X-Client-TLSFP") == [fp["tlsfp"]]
     assert _headers(echo, "X-Client-HTTP2-FP") == []
     assert _headers(echo, "X-Other") == ["kept"]
 
 
-def test_injected_over_http2(nginx_pkg: Nginx) -> None:
+def test_injected_over_http2(srv: Nginx) -> None:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     with httpx.Client(http1=False, http2=True, verify=ctx) as c:
-        base = f"https://localhost:{nginx_pkg.tls}"
+        base = f"https://localhost:{srv.tls}"
         fp = c.get(f"{base}/fp").json()
         r = c.get(f"{base}/echo", headers={"X-Client-HTTP2-FP": "spoofed", "X-Client-JA4": "spoofed",
                                             "X-Client-TLSFP": "spoofed"})
@@ -60,10 +61,10 @@ def test_injected_over_http2(nginx_pkg: Nginx) -> None:
     assert _headers(echo, "X-Client-TLSFP") == [fp["tlsfp"]]
 
 
-def test_server_level_list_replaces_http_level(nginx_pkg: Nginx) -> None:
+def test_server_level_list_replaces_http_level(srv: Nginx) -> None:
     """Port 8444 has its own list: X-FP-Ja4-O and X-FP-H2-Hash only. Headers named only in http{} are not
     managed there, so a client-sent X-Client-JA4 passes through unchanged (documented)."""
-    data = json.loads(get(nginx_pkg.tls_alt, "/", {"X-FP-Ja4-O": "spoofed", "X-Client-JA4": "client"}))
+    data = json.loads(get(srv.tls_alt, "/", {"X-FP-Ja4-O": "spoofed", "X-Client-JA4": "client"}))
     assert _headers(data, "X-FP-Ja4-O") != ["spoofed"]
     assert len(_headers(data, "X-FP-Ja4-O")) == 1 and _headers(data, "X-FP-Ja4-O")[0].startswith("t1")
     assert _headers(data, "X-FP-H2-Hash") == []

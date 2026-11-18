@@ -1,0 +1,24 @@
+# memcheck suppressions for nginx itself, used when the valgrind build runs under memcheck
+# (tests/integration/conftest.py). Each entry is a block nginx allocates once per worker process and, by design,
+# never frees: the process exits. A worker ends with the cycle pool destroyed, so the pointers to these blocks
+# are gone and memcheck calls them definitely lost, or possibly lost when a stale pointer into a block is left.
+
+{
+   nginx-worker-connections-and-events
+   # cycle->connections, read_events and write_events (src/event/ngx_event.c, ngx_event_process_init)
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect,possible
+   fun:malloc
+   fun:ngx_alloc
+   fun:ngx_event_process_init
+}
+
+{
+   nginx-worker-environment
+   # the environment the worker builds from the env directives (src/core/nginx.c, ngx_set_environment)
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect,possible
+   fun:malloc
+   fun:ngx_alloc
+   fun:ngx_set_environment
+}

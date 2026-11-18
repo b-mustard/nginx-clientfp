@@ -1,8 +1,8 @@
 """Impossible and malicious input against a running nginx (t3).
 
-Every test runs against the installed package and, when `./build.sh asan` has been run, against the ASan/UBSan
-build (NGX_DEBUG_PALLOC: every pool allocation is its own malloc). After each test the server must still answer and
-must have no crashed worker and no sanitizer report.
+Every test runs against the installed package and, when they have been built, against the ASan/UBSan build and the
+valgrind build under memcheck (`srv`; both with NGX_DEBUG_PALLOC: every pool allocation is its own malloc). After
+each test the server must still answer and must have no crashed worker, sanitizer report or memcheck error.
 
 HTTP/2 traffic uses cleartext prior knowledge (h2c) so the frame bytes and their TCP segmentation are exactly what the
 test writes; TLS traffic uses raw records so hellos can be malformed.
@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import random
-import re
 import socket
 import struct
 import time
@@ -32,32 +31,6 @@ pytestmark = [pytest.mark.nginx, pytest.mark.docker]
 
 F = ref_h2.FrameType
 END_STREAM, END_HEADERS, PADDED, PRIORITY_FLAG = 0x1, 0x4, 0x8, 0x20
-
-
-@pytest.fixture(params=["pkg", "asan"])
-def srv(request: pytest.FixtureRequest) -> Iterator[Nginx]:
-    n: Nginx = request.getfixturevalue(f"nginx_{request.param}")
-    mark = mark_logs(n)
-    yield n
-    assert_healthy(n, mark)
-
-
-def mark_logs(n: Nginx) -> list[int]:
-    """Set earlier sanitizer reports aside and return the error logs' current sizes, so a test is judged only by what
-    happens during it (a crashed worker is replaced by the master, later tests stay meaningful)."""
-    n.exec("sh", "-c", "mkdir -p /tmp/seen; mv /tmp/asan.* /tmp/ubsan.* /tmp/seen/ 2>/dev/null; true", check=False)
-    return n.log_mark()
-
-
-def assert_healthy(n: Nginx, mark: list[int] | None = None) -> None:
-    assert n.alive(), "nginx stopped answering"
-    report = n.exec("sh", "-c", "cat /tmp/asan.* /tmp/ubsan.* 2>/dev/null", check=False)
-    report += "".join(line + "\n" for line in n.log_since(mark).splitlines()
-                      if re.search(r"exited on signal|runtime error|AddressSanitizer", line))
-    assert report.strip() == "", report[-4000:]
-
-
-# ------------------------------------------------------------------------------------------------- raw HTTP/2
 
 
 def _recv_frames(s: socket.socket, timeout: float) -> Iterator[tuple[int, int, int, bytes]]:
