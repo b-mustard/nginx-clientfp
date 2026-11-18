@@ -56,8 +56,11 @@ host, the package build runs in the container.
 ## Install
 
 ```sh
-sudo apt install ./dist/ubuntu-24.04/nginx-clientfp_1.31.8-1_amd64.deb
+sudo apt install ./dist/<distro name>/nginx-clientfp_1.31.8-1_amd64.deb
 ```
+
+`<distro name>` is the directory that the build put the package in: the docker target, for example `debian-12`, or,
+for a native build, the system of the build machine, for example `ubuntu-24.04`.
 
 The package replaces the distro's `nginx`/`nginx-common` and keeps their layout (`sites-available/`,
 `sites-enabled/`, `snippets/`, `modules-enabled/`, user `www-data`, systemd unit, logrotate, man page).
