@@ -1,5 +1,14 @@
 # nginx-clientfp
 
+## Purpose
+
+Anyone operating a public-facing website is getting hammered by AI bots right now. One effective countermeasure is to
+inspect incoming connections at the TLS and HTTP/2 levels, identifying and blocking simplistic automated tools before
+they can access your site.
+
+This project provides a drop-in Nginx patch designed to make this kind of traffic filtering straightforward, while
+remaining easy to maintain and update with future security patches.
+
 Debian/Ubuntu packages of nginx, built against the distribution's own TLS library (libssl), with client
 fingerprinting built in:
 
