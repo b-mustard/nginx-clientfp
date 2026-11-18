@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import functools
+import itertools
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,4 +116,44 @@ class Versions:
         return f"{PACKAGE}-{self.nginx}"
 
 
-REVISION_RE = re.compile(r"^[0-9][0-9A-Za-z.+~]*$")
+REVISION = r"[0-9][0-9A-Za-z.+~]*"
+REVISION_RE = re.compile(rf"^{REVISION}$")
+
+
+_VERSION_PART = re.compile(r"([^0-9]*)([0-9]*)")
+
+
+def _weights(text: str) -> list[int]:
+    """dpkg's order of the characters between numbers: "~" before the end, then letters, then the others."""
+    return [-1 if c == "~" else ord(c) if c.isascii() and c.isalpha() else ord(c) + 256 for c in text] + [0]
+
+
+def _compare_part(a: str, b: str) -> int:
+    parts = itertools.zip_longest(_VERSION_PART.findall(a), _VERSION_PART.findall(b), fillvalue=("", ""))
+    for (text_a, num_a), (text_b, num_b) in parts:
+        wa, wb = _weights(text_a), _weights(text_b)
+        if wa != wb:
+            return -1 if wa < wb else 1
+        na, nb = int(num_a or 0), int(num_b or 0)
+        if na != nb:
+            return -1 if na < nb else 1
+    return 0
+
+
+def compare_versions(a: str, b: str) -> int:
+    """Order two package versions without an epoch, "1.31.9-1", as dpkg does: <0, 0 or >0 (decision 048)."""
+    upstream_a, _, revision_a = a.rpartition("-") if "-" in a else (a, "", "")
+    upstream_b, _, revision_b = b.rpartition("-") if "-" in b else (b, "", "")
+    return _compare_part(upstream_a, upstream_b) or _compare_part(revision_a, revision_b)
+
+
+def newest_deb(directory: Path, flavor: str) -> Path | None:
+    """The package of a flavor in a dist/<target>/ directory with the highest version (decision 048). Only names of
+    the current scheme count (decision 031)."""
+    name = re.compile(rf"{re.escape(PACKAGE)}_({re.escape(flavor)}\.[0-9]+-{REVISION})_{re.escape(ARCH)}\.deb")
+    found = [(m.group(1), p) for p in directory.glob(f"{PACKAGE}_{flavor}.*_{ARCH}.deb")
+             if (m := name.fullmatch(p.name))]
+    if not found:
+        return None
+    order = functools.cmp_to_key(compare_versions)
+    return max(found, key=lambda version_path: order(version_path[0]))[1]

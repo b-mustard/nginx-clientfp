@@ -42,6 +42,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
+from packager.model import newest_deb
+
 from ..conftest import REPO, VALGRIND
 
 HERE = Path(__file__).resolve().parent
@@ -183,12 +185,10 @@ def _start(image: str, mounts: list[str], script: str, tmp: Path, logs: str,
 
 
 def _deb(target: str, flavor: str) -> Path:
-    name = re.compile(rf"nginx-clientfp_{re.escape(flavor)}\.\d+-[0-9][0-9A-Za-z.+~]*_amd64\.deb")   # decision 031
-    debs = sorted(p for p in (REPO / "dist" / target).glob(f"nginx-clientfp_{flavor}.*_amd64.deb")
-                  if name.fullmatch(p.name))
-    if not debs:
+    deb = newest_deb(REPO / "dist" / target, flavor)   # the highest version (decision 048)
+    if deb is None:
         pytest.skip(f"no package for flavor {flavor} in dist/{target}/ (run ./build.sh build --target {target})")
-    return debs[-1]
+    return deb
 
 
 @pytest.fixture(scope="session")
