@@ -117,17 +117,24 @@ The installed package has a copy of both example files in `/usr/share/doc/nginx-
 python3 examples/echo_server.py
 ```
 
-The server has no options. It listens on `127.0.0.1:8081`, the address that the example site sends requests to, so
-other machines cannot connect to it. Clients send their requests to nginx.
+The server listens on `127.0.0.1:8081`, the address that the example site sends requests to, so other machines
+cannot connect to it. Clients send their requests to nginx.
 
-The server writes the address of nginx:
+At start, the server sends one request to `https://cloudflare.com/cdn-cgi/trace` to get the public address of the
+machine. Then it writes the address of nginx:
 
 ```
-echo server ready. Send requests to nginx: https://localhost:8443/ (other machines: https://<this machine>:8443/)
+echo server ready. Send requests to nginx: https://localhost:8443/ (other machines: https://203.0.113.7:8443/)
 ```
 
-Then it writes one line for each request, with the JA4 that it received. Keep this terminal open, and use a second
-terminal for step 7. Press Ctrl-C to stop the server.
+- The address is the one that the internet sees. Behind a router (NAT), machines on the same local network may not
+  reach it: they use the local address of the test machine.
+- If the request fails, for example without internet, the server writes `<this machine>` in place of the address,
+  and a line with the reason. It starts all the same.
+- To start the server without this request, use `python3 examples/echo_server.py --no-lookup`.
+
+Then the server writes one line for each request, with the JA4 and the TLSFP that it received. Keep this terminal
+open, and use a second terminal for step 7. Press Ctrl-C to stop the server.
 
 ## 7. Send a request
 
