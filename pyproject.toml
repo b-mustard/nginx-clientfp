@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nginx-clientfp"
 version = "0.1.0"
-description = "Build tooling and tests for nginx with JA4 and HTTP/2 client fingerprinting"
+description = "Build tooling and tests for nginx with JA4, TLSFP, and HTTP/2 client fingerprinting"
 requires-python = ">=3.11"
 license = "BSD-2-Clause"
 dependencies = []
