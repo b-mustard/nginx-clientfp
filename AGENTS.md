@@ -19,8 +19,8 @@ brackets (h1, g1, ...) are the names the decision log uses for them.
   addresses, in commits, code or docs [g2].
 - Brief messages [g3]: one line, `Area: what changed`, plus the decision number when there is one.
 - One commit per logical change, without being asked [g4]: decision record, implementation, tests, docs.
-- Current state (2026-11-18): all work goes to the branch `no_openssl` until the maintainer says to merge or
-  abandon it. **Do not push.**
+- Current state (2026-11-18): the branch `no_openssl` is merged into `main`, and work goes to `main`. **Do not
+  push** until the maintainer says that pushing is allowed again.
 
 ## Code
 
