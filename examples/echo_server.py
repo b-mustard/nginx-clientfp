@@ -5,18 +5,24 @@ nginx terminates TLS / HTTP/2 / HTTP/3, computes the signatures and adds them as
 (clientfp_request_header); this server answers every request with a JSON object of those headers, plus every
 other request header, so you can see what an application behind nginx receives.
 
-    python3 examples/echo_server.py [--host 127.0.0.1] [--port 8081]
+    python3 examples/echo_server.py
 
-nginx side: see examples/nginx-echo.conf.
+The server listens on 127.0.0.1:8081, the upstream of examples/nginx-echo.conf; clients send their requests to
+nginx, at https://localhost:8443/. A request sent here directly carries no fingerprints.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 from email.message import Message
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# Both fixed by examples/nginx-echo.conf: the upstream (proxy_pass) and the port nginx listens on for clients.
+LISTEN = ("127.0.0.1", 8081)
+NGINX_PORT = 8443
 
 FINGERPRINT_HEADERS = (
     "X-Client-JA4",
@@ -29,6 +35,17 @@ FINGERPRINT_HEADERS = (
     "X-Client-HTTP2-FP-Hash",
     "X-Client-HTTP2-FP-Overflow",
 )
+
+
+def printable(text: str) -> str:
+    """`text` with each character outside printable ASCII written as an escape such as \\x16, so that a request
+    with binary data cannot put control characters or escape sequences on the terminal."""
+    return "".join(c if " " <= c <= "~" else ascii(c)[1:-1] for c in text)
+
+
+def banner() -> str:
+    return (f"echo server ready. Send requests to nginx: https://localhost:{NGINX_PORT}/ "
+            f"(other machines: https://<this machine>:{NGINX_PORT}/)")
 
 
 class EchoHandler(BaseHTTPRequestHandler):
@@ -73,16 +90,16 @@ class EchoHandler(BaseHTTPRequestHandler):
         # attribute on every handler, so mypy does not see that it can be missing.
         headers: Message | None = getattr(self, "headers", None)
         ja4 = headers.get("X-Client-JA4", "-") if headers is not None else "-"
-        print(f"{self.address_string()} {format % args} ja4={ja4}", flush=True)
+        print(printable(f"{self.address_string()} {format % args} ja4={ja4}"), flush=True)
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8081)
-    a = ap.parse_args()
-    httpd = ThreadingHTTPServer((a.host, a.port), EchoHandler)
-    print(f"echo server on http://{a.host}:{a.port}/", flush=True)
+    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
+    try:
+        httpd = ThreadingHTTPServer(LISTEN, EchoHandler)
+    except OSError as e:
+        sys.exit(f"cannot listen on {LISTEN[0]}:{LISTEN[1]}: {e.strerror}")
+    print(banner(), flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
