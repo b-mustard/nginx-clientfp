@@ -51,3 +51,4 @@ Every engineering decision, automatic or human (workflow rule h2), gets one file
 | 045 | [GitHub releases of the packages](decision_045.md) | human |
 | 046 | [A second release on the same day](decision_046.md) | human |
 | 047 | [The docs write `<version>` in package file names](decision_047.md) | human |
+| 048 | [The tests use the package with the highest version](decision_048.md) | human |
