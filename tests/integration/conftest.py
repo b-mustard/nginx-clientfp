@@ -216,7 +216,8 @@ def runtime_image(require_docker: None, target: str) -> str:
 
 
 INSTALL_DEB = "set -e; dpkg -i /pkg/nginx-clientfp.deb > /tmp/dpkg.log 2>&1 || { cat /tmp/dpkg.log; exit 1; }; "
-ECHO_UPSTREAM = "python3 /examples/echo_server.py > /tmp/echo.log 2>&1 & "
+# --no-lookup: a test run sends no requests to the trace URL (decision 044)
+ECHO_UPSTREAM = "python3 /examples/echo_server.py --no-lookup > /tmp/echo.log 2>&1 & "
 
 
 @pytest.fixture(scope="session")
