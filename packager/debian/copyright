@@ -1,11 +1,13 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: nginx-clientfp
-Source: https://nginx.org
+Source: https://github.com/b-mustard/nginx-clientfp
+Comment: nginx itself comes from https://nginx.org, with the patches of nginx-clientfp applied.
 
 Files: nginx/*
 Copyright: 2002-2021 Igor Sysoev
            2011-2026 Nginx, Inc.
            2026 F5, Inc.
+           2026 nginx-clientfp contributors (patches)
 License: BSD-2-clause
 
 Files: clientfp/*

@@ -95,3 +95,10 @@ Made by the build, not in git:
 | `extern_src/` | Upstream git clones |
 | `build/` | Working trees, test builds of nginx (`asan/`, `valgrind/`), logs |
 | `dist/<distro>/` | `.deb` output |
+
+## License
+
+BSD-2-Clause, the license of nginx itself: see [LICENSE](LICENSE). Two documents keep the license of their source:
+
+- `doc/ja4_sig.md` is derived from FoxIO's `JA4.md` and is under BSD-3-Clause, Copyright (c) 2026 FoxIO.
+- `doc/nDPI_TLS_Fingerprint.md` is ntop's draft, under CC BY 4.0.
