@@ -28,3 +28,6 @@ a.out
 *.swp
 *~
 .DS_Store
+
+# Credentials for origin_pub (decision 042): never committed
+.secrets

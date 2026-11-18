@@ -19,8 +19,12 @@ brackets (h1, g1, ...) are the names the decision log uses for them.
   addresses, in commits, code or docs [g2].
 - Brief messages [g3]: one line, `Area: what changed`, plus the decision number when there is one.
 - One commit per logical change, without being asked [g4]: decision record, implementation, tests, docs.
-- Current state (2026-11-18): the branch `no_openssl` is merged into `main`, and work goes to `main`. **Do not
-  push** until the maintainer says that pushing is allowed again.
+- Remotes (decision 042): `origin` is the private repository, `origin_pub` the public one on GitHub. **Never write
+  the address of the private repository** in anything that can reach `origin_pub`: commits, code, docs, decision
+  records. Write "the private repository" instead.
+- `.secrets` holds the credentials for `origin_pub`. Git ignores it. Never commit, print or log its contents.
+- Current state (2026-11-18): work goes to `main`. **Do not push** to either remote until the maintainer says that
+  pushing is allowed.
 
 ## Code
 
