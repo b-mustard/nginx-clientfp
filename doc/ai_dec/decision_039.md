@@ -13,3 +13,5 @@ better method exists or when asked, so the Linux packages have epoll alone and c
 The ASan build (`./build.sh asan`, used only by the tests) is configured with `--with-poll_module` and
 `--with-select_module`. `tests/integration/test_hello_wait.py` runs its level-triggered cases against it. The
 package keeps the default event modules.
+
+The valgrind build of decision 040 has the same configure arguments, so these cases run under memcheck too.

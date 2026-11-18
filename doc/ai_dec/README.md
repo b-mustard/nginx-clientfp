@@ -43,3 +43,4 @@ Every engineering decision, automatic or human (workflow rule h2), gets one file
 | 037 | [ClientHello capture: implementation details](decision_037.md) | automatic |
 | 038 | [A connection waiting for its ClientHello is not reusable](decision_038.md) | human |
 | 039 | [Level-triggered event methods are tested on the ASan build only](decision_039.md) | automatic |
+| 040 | [valgrind's memcheck in the tests](decision_040.md) | automatic |

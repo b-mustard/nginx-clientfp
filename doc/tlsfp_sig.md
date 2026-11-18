@@ -122,7 +122,7 @@ gives the same value for typical browser hellos, but differs in these cases (dec
 
 - `clientfp-tlsfp --selftest` and `tests/unit/test_fp_tlsfp.py` check every rule above with hand-written hash
   inputs, and all 81 recorded hellos for shape and for `b == JA4_b`.
-- `tests/test_c_core.py` compares the C core with the Python reference, under ASan and UBSan:
+- `tests/test_c_core.py` compares the C core with the Python reference, under ASan and UBSan and under valgrind:
   - the 81 vectors;
   - about 9,700 mutated hellos;
   - hellos whose ALPN, supported_versions, signature_algorithms or supported_groups inner list is corrupted,
