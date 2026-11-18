@@ -47,3 +47,4 @@ Every engineering decision, automatic or human (workflow rule h2), gets one file
 | 041 | [The changelog names the codename of the target](decision_041.md) | automatic |
 | 042 | [Public repository `origin_pub`](decision_042.md) | human |
 | 043 | [License: BSD-2-Clause](decision_043.md) | human |
+| 044 | [The echo server shows its public address](decision_044.md) | human |
