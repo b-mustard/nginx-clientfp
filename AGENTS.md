@@ -31,6 +31,14 @@ brackets (h1, g1, ...) are the names the decision log uses for them.
 - Python is typed and passes `mypy --strict` (configured in `pyproject.toml`). Use `.venv`, which `./build.sh`
   creates; do not install into the system Python.
 - Lines are at most 120 characters (code and Markdown).
+- License BSD-2-Clause (decision 043). A new code file starts with these two comment lines; `tests/unit/test_license.py`
+  checks them:
+
+  ```
+  SPDX-License-Identifier: BSD-2-Clause
+  Copyright (c) 2026 nginx-clientfp contributors
+  ```
+
 - The module's pure-C cores (`nginx_module/src/clientfp_*.c`) do not depend on nginx or on a TLS library. nginx
   changes go in `patches/nginx/<line>/`, kept as small as possible.
 - OpenSSL is not part of the project: packages link the distribution's libssl (decision 029). Code, docs and
