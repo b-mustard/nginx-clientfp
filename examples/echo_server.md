@@ -49,10 +49,8 @@ If a build package is missing, step 3 stops and shows the command that installs 
 
 Do this step and step 3 as your normal user. Do not use `sudo`.
 
-The public address of the repository is not published yet. Use the address that you received.
-
 ```sh
-git clone <repository-url> nginx-clientfp
+git clone https://github.com/b-mustard/nginx-clientfp.git
 cd nginx-clientfp
 git checkout main          # or the branch or tag that you want to build
 ```
