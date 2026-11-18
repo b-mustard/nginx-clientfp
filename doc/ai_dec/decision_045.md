@@ -20,3 +20,5 @@ each file of a release.
 - The release is published at once and marked Latest. It is created as a draft first, and published only when all
   its files are uploaded and their checksums agree with the local files.
 - Before a release, all 8 packages are built again from the commit, and the package tests run for each target.
+
+Note: decision 046 gives a second release on the same day the tag `<date>-2`.

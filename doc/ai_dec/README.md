@@ -49,3 +49,4 @@ Every engineering decision, automatic or human (workflow rule h2), gets one file
 | 043 | [License: BSD-2-Clause](decision_043.md) | human |
 | 044 | [The echo server shows its public address](decision_044.md) | human |
 | 045 | [GitHub releases of the packages](decision_045.md) | human |
+| 046 | [A second release on the same day](decision_046.md) | human |
