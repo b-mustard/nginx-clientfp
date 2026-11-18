@@ -74,11 +74,11 @@ On a machine with 2 CPUs, the build takes approximately 2 minutes. The last line
 package, for example:
 
 ```
-dist/ubuntu-24.04/nginx-clientfp_1.31.8-1_amd64.deb
+dist/ubuntu-24.04/nginx-clientfp_<version>_amd64.deb
 ```
 
-The directory name is the distribution of the machine, for example `dist/debian-13/` on Debian 13. The version in
-the file name is the newest nginx release of the line.
+The directory name is the distribution of the machine, for example `dist/debian-13/` on Debian 13. In place of
+`<version>`, the output shows the newest nginx release of the line, then the package revision `-1`.
 
 To build a package for a different distribution, use a Docker build. See [Build](../README.md#build) in README.md.
 
