@@ -27,6 +27,10 @@ has no 0-RTT.
 
 ## Build
 
+For a first build, follow the end-to-end guide [examples/echo_server.md](examples/echo_server.md). It goes from
+`git clone` to a running nginx: it installs the build dependencies, builds and installs the package, and starts an
+echo server that shows the fingerprints of your requests.
+
 ```sh
 ./build.sh                                   # this distro, both flavors (needs the build deps below)
 ./build.sh build --target all                # every docker target
@@ -72,7 +76,7 @@ See [tests/README.md](tests/README.md).
 | `nginx_module/` | `ngx_http_clientfp_module`: nginx glue and pure-C cores (capture, JA4, TLSFP, HTTP/2, SHA-256) |
 | `tools/clientfp/` | Python package: reference implementations and live probes |
 | `tests/` | pytest suites, C drivers, fuzz targets, test Dockerfiles, valgrind suppressions |
-| `examples/` | Echo upstream and nginx site that show the added headers; `echo_server.md` tells how to run them |
+| `examples/` | Echo upstream and nginx site that show the added headers; `echo_server.md` is the end-to-end guide |
 
 Made by the build, not in git:
 
