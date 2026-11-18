@@ -4,8 +4,9 @@ Debian/Ubuntu packages of nginx, built against the distribution's own TLS librar
 fingerprinting built in:
 
 - **JA4**: TLS ClientHello fingerprint (TLS over TCP and QUIC/HTTP/3), spec in [doc/ja4_sig.md](doc/ja4_sig.md).
-- **TLSFP**: nDPI TLS client fingerprint (JA4 without ephemeral extensions, plus a supported-groups hash), draft
-  [doc/nDPI_TLS_Fingerprint.md](doc/nDPI_TLS_Fingerprint.md), implementation notes in [doc/tlsfp_sig.md](doc/tlsfp_sig.md).
+- **TLSFP**: nDPI TLS client fingerprint (JA4 without ephemeral extensions, plus a supported-groups hash),
+  draft [doc/nDPI_TLS_Fingerprint.md](doc/nDPI_TLS_Fingerprint.md), implementation notes in
+  [doc/tlsfp_sig.md](doc/tlsfp_sig.md).
 - **HTTP/2 signature**: Akamai passive HTTP/2 fingerprint, spec in [doc/http2_sig.md](doc/http2_sig.md).
 
 The fingerprints are available as `$clientfp_*` variables and are passed to upstreams as request headers that
@@ -63,13 +64,20 @@ See [tests/README.md](tests/README.md).
 
 ## Layout
 
-```
-doc/            specs, module reference, decision log (doc/ai_dec/)
-packager/       Python build orchestration + debian/ templates + Dockerfile
-patches/        patches/nginx/<line>/*.patch (HTTP/2 hooks, ClientHello capture hooks)
-nginx_module/   ngx_http_clientfp_module (nginx glue + pure-C capture/JA4/TLSFP/HTTP2/SHA-256 cores)
-tools/          clientfp Python package: reference implementations and live probes
-tests/          pytest suites, C drivers, fuzz targets, test Dockerfiles
-examples/       echo upstream + nginx site showing the injected headers
-[extern_src/]   upstream git clones        [build/] working trees        [dist/] .deb output
-```
+| Directory | Contents |
+|---|---|
+| `doc/` | Specs, module reference, decision log (`doc/ai_dec/`) |
+| `packager/` | Python build orchestration, `debian/` templates, build Dockerfile |
+| `patches/nginx/<line>/` | nginx patches: HTTP/2 hooks, ClientHello capture hooks |
+| `nginx_module/` | `ngx_http_clientfp_module`: nginx glue and pure-C cores (capture, JA4, TLSFP, HTTP/2, SHA-256) |
+| `tools/clientfp/` | Python package: reference implementations and live probes |
+| `tests/` | pytest suites, C drivers, fuzz targets, test Dockerfiles, valgrind suppressions |
+| `examples/` | Echo upstream and nginx site that show the added headers; `echo_server.md` tells how to run them |
+
+Made by the build, not in git:
+
+| Directory | Contents |
+|---|---|
+| `extern_src/` | Upstream git clones |
+| `build/` | Working trees, test builds of nginx (`asan/`, `valgrind/`), logs |
+| `dist/<distro>/` | `.deb` output |
