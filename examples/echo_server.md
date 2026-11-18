@@ -8,9 +8,46 @@ application.
 client --TLS, HTTP/2 or HTTP/3--> nginx-clientfp :8443 --HTTP/1.1 + X-Client-* headers--> echo_server.py :8081
 ```
 
-Use a test machine. The package replaces the distribution's `nginx`.
+These steps build the package on the test machine and install it there. This is a native build: it uses the
+compiler and the libraries of the test machine, and it does not need Docker.
 
-## 1. Get the source
+The test machine must have:
+
+- Ubuntu 24.04, Ubuntu 26.04, Debian 12 or Debian 13.
+- Access to the internet. The build downloads the nginx source from GitHub.
+- Approximately 800 MB of free disk space.
+- A user account that can use `sudo`.
+
+The package replaces the `nginx` package of the distribution. Do not use a machine where nginx serves real sites.
+
+If you already have the `.deb` file for the test machine, go to step 4.
+
+## 1. Install the prerequisites
+
+1. Update the package lists:
+
+   ```sh
+   sudo apt update
+   ```
+
+2. Install the build tools and the libraries:
+
+   ```sh
+   sudo apt install git python3-venv build-essential debhelper dpkg-dev fakeroot lintian \
+       libpcre2-dev libssl-dev zlib1g-dev
+   ```
+
+   `git` gets the source. `python3-venv` lets `build.sh` make its Python environment. `build-essential`,
+   `debhelper`, `dpkg-dev`, `fakeroot` and `lintian` compile nginx, make the `.deb` file and check it.
+   `libpcre2-dev`, `libssl-dev` and `zlib1g-dev` are the libraries that nginx uses.
+
+   On a minimal system, apt installs approximately 340 packages, which use approximately 540 MB.
+
+If a build package is missing, step 3 stops and shows the command that installs it.
+
+## 2. Get the source
+
+Do this step and step 3 as your normal user. Do not use `sudo`.
 
 The public address of the repository is not published yet. Use the address that you received.
 
@@ -20,34 +57,44 @@ cd nginx-clientfp
 git checkout main          # or the branch or tag that you want to build
 ```
 
-## 2. Build the package
+## 3. Build the package
 
-You need Linux with `git`, Python 3 with the `venv` module (`python3-venv` on Debian and Ubuntu), and Docker
-(rootless Docker is sufficient). The build downloads the nginx source.
-
-Select the target that agrees with the machine where you will install the package: `ubuntu-24.04`, `ubuntu-26.04`,
-`debian-12` or `debian-13`. Select the nginx line: `1.31` or `1.30`.
+Select the nginx line: `1.31` or `1.30`. In the `nginx-clientfp` directory, build the package:
 
 ```sh
-./build.sh build --target ubuntu-24.04 --flavor 1.31
+./build.sh build --flavor 1.31
 ```
 
-The first build also makes the Docker build image, which takes some minutes. The result is a file in
-`dist/<target>/`, for example `dist/ubuntu-24.04/nginx-clientfp_1.31.8-1_amd64.deb`.
+The build does these steps:
 
-If you already have the `.deb` file, go to step 3.
+1. It makes a Python environment in `.venv` (only the first time).
+2. It downloads the source of the newest nginx release of the line into `extern_src/`.
+3. It applies the patches, compiles nginx with the module and makes the `.deb` file.
+4. It checks the package.
 
-## 3. Install the package
+On a machine with 2 CPUs, the build takes approximately 2 minutes. The last line of the output is the path of the
+package, for example:
 
-Copy the `.deb` file to the test machine if necessary. Then install it. Use the name of the file from step 2:
+```
+dist/ubuntu-24.04/nginx-clientfp_1.31.8-1_amd64.deb
+```
+
+The directory name is the distribution of the machine. The version in the file name is the newest nginx release of
+the line.
+
+To build a package for a different distribution, use a Docker build. See [Build](../README.md#build) in README.md.
+
+## 4. Install the package
+
+Install the package with the path from step 3, and Python 3 and curl for steps 6 and 7:
 
 ```sh
-sudo apt install ./dist/ubuntu-24.04/nginx-clientfp_1.31.8-1_amd64.deb
+sudo apt install ./dist/ubuntu-24.04/nginx-clientfp_1.31.8-1_amd64.deb python3 curl
 ```
 
 apt also installs `ssl-cert`, which makes the self-signed certificate that the example site uses.
 
-## 4. Enable the example site
+## 5. Enable the example site
 
 The site listens on port 8443 for TLS (HTTP/1.1 and HTTP/2) and for QUIC (HTTP/3). It sends each request to
 `127.0.0.1:8081` with all the fingerprint headers.
@@ -62,18 +109,18 @@ sudo systemctl reload nginx
 
 The installed package has a copy of both example files in `/usr/share/doc/nginx-clientfp/examples/`.
 
-## 5. Start the echo server
+## 6. Start the echo server
 
-The server needs only Python 3. It listens on `127.0.0.1:8081`.
+The server listens on `127.0.0.1:8081`.
 
 ```sh
 python3 examples/echo_server.py --port 8081
 ```
 
 The server writes `echo server on http://127.0.0.1:8081/`, then one line for each request, with the JA4 that it
-received. Keep this terminal open, and use a second terminal for step 6. Press Ctrl-C to stop the server.
+received. Keep this terminal open, and use a second terminal for step 7. Press Ctrl-C to stop the server.
 
-## 6. Send a request
+## 7. Send a request
 
 From the test machine:
 
@@ -122,9 +169,9 @@ port 8443 and UDP port 8443 in the firewall.
 
 ## If it does not work
 
-- **`502 Bad Gateway`**: the echo server does not run. Do step 5.
+- **`502 Bad Gateway`**: the echo server does not run. Do step 6.
 - **`nginx -t` shows `unknown directive "clientfp_request_header"`**: the nginx on the machine is not
-  nginx-clientfp. Do step 3.
+  nginx-clientfp. Do step 4.
 - **`nginx -t` shows `cannot load certificate "/etc/ssl/certs/ssl-cert-snakeoil.pem"`**: the certificate is
   missing. Run `sudo apt install ssl-cert`.
 - **No reply on port 8443, and `/var/log/nginx/error.log` shows `bind() to 0.0.0.0:8443 failed (98: Address
