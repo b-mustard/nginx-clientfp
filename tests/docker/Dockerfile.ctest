@@ -1,6 +1,7 @@
-# Standalone C tests and libFuzzer targets for nginx_module/src (tests/test_c_core.py, tests/test_fuzz.py).
+# Standalone C tests and libFuzzer targets for nginx_module/src (tests/test_c_core.py, tests/test_fuzz.py), run
+# under ASan/UBSan and under valgrind.
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
- && apt-get install -y --no-install-recommends clang libclang-rt-18-dev llvm gcc libc6-dev make \
+ && apt-get install -y --no-install-recommends clang libclang-rt-18-dev llvm gcc libc6-dev make valgrind \
  && rm -rf /var/lib/apt/lists/*
