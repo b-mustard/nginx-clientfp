@@ -9,6 +9,8 @@ they can access your site.
 This project provides a drop-in Nginx patch designed to make this kind of traffic filtering straightforward, while
 remaining easy to maintain and update with future security patches.
 
+## What it is
+
 Debian/Ubuntu packages of nginx, built against the distribution's own TLS library (libssl), with client
 fingerprinting built in:
 
