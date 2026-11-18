@@ -79,18 +79,22 @@ package, for example:
 dist/ubuntu-24.04/nginx-clientfp_1.31.8-1_amd64.deb
 ```
 
-The directory name is the distribution of the machine. The version in the file name is the newest nginx release of
-the line.
+The directory name is the distribution of the machine, for example `dist/debian-13/` on Debian 13. The version in
+the file name is the newest nginx release of the line.
 
 To build a package for a different distribution, use a Docker build. See [Build](../README.md#build) in README.md.
 
 ## 4. Install the package
 
-Install the package with the path from step 3, and Python 3 and curl for steps 6 and 7:
+Install the package from step 3, and Python 3 and curl for steps 6 and 7:
 
 ```sh
-sudo apt install ./dist/ubuntu-24.04/nginx-clientfp_1.31.8-1_amd64.deb python3 curl
+sudo apt install ./dist/*/nginx-clientfp_1.31.*.deb python3 curl
 ```
+
+For a `1.30` build, write `1.30` in the pattern. The pattern must find exactly one file:
+`ls dist/*/nginx-clientfp_1.31.*.deb` shows the files that it finds. If you got the `.deb` file from a different
+place, write its path instead.
 
 apt also installs `ssl-cert`, which makes the self-signed certificate that the example site uses.
 
@@ -111,14 +115,21 @@ The installed package has a copy of both example files in `/usr/share/doc/nginx-
 
 ## 6. Start the echo server
 
-The server listens on `127.0.0.1:8081`.
-
 ```sh
-python3 examples/echo_server.py --port 8081
+python3 examples/echo_server.py
 ```
 
-The server writes `echo server on http://127.0.0.1:8081/`, then one line for each request, with the JA4 that it
-received. Keep this terminal open, and use a second terminal for step 7. Press Ctrl-C to stop the server.
+The server has no options. It listens on `127.0.0.1:8081`, the address that the example site sends requests to, so
+other machines cannot connect to it. Clients send their requests to nginx.
+
+The server writes the address of nginx:
+
+```
+echo server ready. Send requests to nginx: https://localhost:8443/ (other machines: https://<this machine>:8443/)
+```
+
+Then it writes one line for each request, with the JA4 that it received. Keep this terminal open, and use a second
+terminal for step 7. Press Ctrl-C to stop the server.
 
 ## 7. Send a request
 
@@ -170,6 +181,8 @@ port 8443 and UDP port 8443 in the firewall.
 ## If it does not work
 
 - **`502 Bad Gateway`**: the echo server does not run. Do step 6.
+- **The echo server stops with `cannot listen on 127.0.0.1:8081: Address already in use`**: a different program
+  uses port 8081, for example an echo server that still runs. Stop that program.
 - **`nginx -t` shows `unknown directive "clientfp_request_header"`**: the nginx on the machine is not
   nginx-clientfp. Do step 4.
 - **`nginx -t` shows `cannot load certificate "/etc/ssl/certs/ssl-cert-snakeoil.pem"`**: the certificate is
