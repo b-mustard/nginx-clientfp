@@ -6,6 +6,8 @@ clientfp-test.conf and the examples/ echo upstream on 127.0.0.1:8081.
 
 `nginx_asan`: the ASan/UBSan nginx from `./build.sh asan` (build/asan/<flavor>/), same site, in the build image.
 
+`custom_nginx()`: either of them with an nginx.conf of the test's own (`nginx_conf()`), in a container of its own.
+
 Ports are published on 127.0.0.1 with the same host port for TCP and UDP (QUIC).
 """
 
@@ -19,7 +21,8 @@ import ssl
 import subprocess
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,6 +61,18 @@ class Nginx:
 
     def error_log(self) -> str:
         return self.exec("sh", "-c", f"cat {self.logs} 2>/dev/null", check=False)
+
+    def log_mark(self) -> list[int]:
+        """The current size of each error log file, for log_since()."""
+        sizes = self.exec("sh", "-c", " ".join(f"cat {f} 2>/dev/null | wc -c;" for f in self.logs.split()))
+        return [int(s) for s in sizes.split()]
+
+    def log_since(self, mark: list[int] | None = None) -> str:
+        """What each error log file gained after `mark` (all of it without one)."""
+        files = self.logs.split()
+        offsets = mark or [0] * len(files)
+        return self.exec("sh", "-c", "; ".join(f"tail -c +{m + 1} {f} 2>/dev/null" for f, m in zip(files, offsets)),
+                         check=False)
 
     def alive(self) -> bool:
         try:
@@ -126,7 +141,7 @@ def _wait_ready(n: Nginx, timeout: float = 60) -> None:
     raise AssertionError(f"nginx did not come up:\n{logs.stdout[-3000:]}\n{logs.stderr[-3000:]}")
 
 
-def _start(image: str, mounts: list[str], script: str, tmp: Path, logs: str) -> Iterator[Nginx]:
+def _start(image: str, mounts: list[str], script: str, tmp: Path, logs: str) -> Generator[Nginx, None, None]:
     name = f"clientfp-test-{uuid.uuid4().hex[:8]}"
     tls, h2c, alt = _free_port(), _free_port(), _free_port()
     cmd = ["docker", "run", "-d", "--name", name,
@@ -179,38 +194,35 @@ def runtime_image(require_docker: None, target: str) -> str:
     return image
 
 
+INSTALL_DEB = "set -e; dpkg -i /pkg/nginx-clientfp.deb > /tmp/dpkg.log 2>&1 || { cat /tmp/dpkg.log; exit 1; }; "
+ECHO_UPSTREAM = "python3 /examples/echo_server.py --port 8081 > /tmp/echo.log 2>&1 & "
+
+
 @pytest.fixture(scope="session")
 def nginx_pkg(runtime_image: str, deb: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Nginx]:
     tmp = tmp_path_factory.mktemp("nginx-pkg")
     _cert(tmp)
     (tmp / "clientfp-test.conf").write_text((HERE / "clientfp-test.conf").read_text())
     script = (
-        "set -e; dpkg -i /pkg/nginx-clientfp.deb > /tmp/dpkg.log 2>&1 || { cat /tmp/dpkg.log; exit 1; }; "
-        "rm -f /etc/nginx/sites-enabled/default; "
+        INSTALL_DEB + "rm -f /etc/nginx/sites-enabled/default; "
         "cp /etc/nginx/test/clientfp-test.conf /etc/nginx/sites-enabled/; "
-        "python3 /examples/echo_server.py --port 8081 > /tmp/echo.log 2>&1 & "
-        "exec nginx -g 'daemon off;' 2> /tmp/nginx.stderr"
+        + ECHO_UPSTREAM + "exec nginx -g 'daemon off;' 2> /tmp/nginx.stderr"
     )
     yield from _start(runtime_image, ["-v", f"{deb}:/pkg/nginx-clientfp.deb:ro"], script, tmp,
                       "/var/log/nginx/error.log /tmp/nginx.stderr")
 
 
-@pytest.fixture(scope="session")
-def nginx_asan(require_docker: None, flavor: str, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Nginx]:
-    prefix = REPO / "build" / "asan" / flavor
-    binary = prefix / "sbin" / "nginx"
-    if not binary.exists():
-        pytest.skip(f"no ASan build in {prefix} (run ./build.sh asan --flavor {flavor})")
-    tmp = tmp_path_factory.mktemp("nginx-asan")
-    _cert(tmp)
+def nginx_conf(events: str = "worker_connections 512;", workers: int = 2, http: str = "") -> str:
+    """A complete nginx.conf around the test site, with the request headers of the packaged nginx.conf; `events`
+    and `http` are added to those blocks."""
     site = (HERE / "clientfp-test.conf").read_text()
-    conf = f"""
+    return f"""
 daemon off;
 master_process on;
-worker_processes 2;
+worker_processes {workers};
 error_log /tmp/error.log info;
 pid /tmp/nginx.pid;
-events {{ worker_connections 512; }}
+events {{ {events} }}
 http {{
     access_log off;
     client_body_temp_path /tmp/body; proxy_temp_path /tmp/proxy; fastcgi_temp_path /tmp/fastcgi;
@@ -218,22 +230,52 @@ http {{
     clientfp_request_header X-Client-JA4 $clientfp_ja4;
     clientfp_request_header X-Client-TLSFP $clientfp_tlsfp;
     clientfp_request_header X-Client-HTTP2-FP $clientfp_http2;
+    {http}
 {site}
 }}
 """
+
+
+@contextmanager
+def custom_nginx(request: pytest.FixtureRequest, kind: str, conf: str) -> Iterator[Nginx]:
+    """The installed package (`kind` "pkg") or the ASan build ("asan") running `conf`, in a container of its own.
+    The ASan build's sanitizer reports are kept in build/test-logs/."""
+    tmp = request.getfixturevalue("tmp_path_factory").mktemp(f"nginx-{kind}")
+    _cert(tmp)
     (tmp / "nginx.conf").write_text(conf)
-    image = "nginx-clientfp-build:ubuntu-24.04"
-    script = (
-        "python3 /examples/echo_server.py --port 8081 > /tmp/echo.log 2>&1 & "
-        "ASAN_OPTIONS=detect_leaks=0:abort_on_error=0:log_path=/tmp/asan "
-        "UBSAN_OPTIONS=print_stacktrace=1:log_path=/tmp/ubsan "
-        f"exec /work/build/asan/{flavor}/sbin/nginx -p /tmp/ -c /etc/nginx/test/nginx.conf 2> /tmp/nginx.stderr"
-    )
-    mounts = ["-v", f"{REPO}:/work:ro"]
-    for n in _start(image, mounts, script, tmp, "/tmp/error.log /tmp/nginx.stderr"):
+    if kind == "pkg":
+        image = str(request.getfixturevalue("runtime_image"))
+        mounts = ["-v", f"{request.getfixturevalue('deb')}:/pkg/nginx-clientfp.deb:ro"]
+        script = INSTALL_DEB + ECHO_UPSTREAM + "exec nginx -c /etc/nginx/test/nginx.conf 2> /tmp/nginx.stderr"
+    else:
+        request.getfixturevalue("require_docker")
+        flavor = str(request.getfixturevalue("flavor"))
+        prefix = REPO / "build" / "asan" / flavor
+        if not (prefix / "sbin" / "nginx").exists():
+            pytest.skip(f"no ASan build in {prefix} (run ./build.sh asan --flavor {flavor})")
+        image = "nginx-clientfp-build:ubuntu-24.04"
+        mounts = ["-v", f"{REPO}:/work:ro"]
+        script = (
+            ECHO_UPSTREAM + "ASAN_OPTIONS=detect_leaks=0:abort_on_error=0:log_path=/tmp/asan "
+            "UBSAN_OPTIONS=print_stacktrace=1:log_path=/tmp/ubsan "
+            f"exec /work/build/asan/{flavor}/sbin/nginx -p /tmp/ -c /etc/nginx/test/nginx.conf 2> /tmp/nginx.stderr"
+        )
+    container = _start(image, mounts, script, tmp, "/tmp/error.log /tmp/nginx.stderr")
+    n = next(container)
+    try:
         yield n
-        report = n.exec("sh", "-c", "cat /tmp/asan* /tmp/ubsan* /tmp/error.log 2>/dev/null", check=False)
-        (REPO / "build" / "test-logs" / f"{n.container}-asan.log").write_text(report)
+    finally:
+        if kind == "asan":
+            report = n.exec("sh", "-c", "cat /tmp/asan* /tmp/ubsan* /tmp/error.log 2>/dev/null", check=False)
+            (REPO / "build" / "test-logs").mkdir(parents=True, exist_ok=True)
+            (REPO / "build" / "test-logs" / f"{n.container}-asan.log").write_text(report)
+        container.close()   # saves the error log and removes the container
+
+
+@pytest.fixture(scope="session")
+def nginx_asan(request: pytest.FixtureRequest) -> Iterator[Nginx]:
+    with custom_nginx(request, "asan", nginx_conf()) as n:
+        yield n
 
 
 def fp_json(port: int) -> dict[str, str]:

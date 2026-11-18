@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import socket
-import ssl
 import struct
 import time
 from collections.abc import Callable, Iterator, Sequence
@@ -22,11 +22,11 @@ import hpack
 import pytest
 
 from clientfp.fp import h2 as ref_h2
-from clientfp.fp import ja4 as ref_ja4
 from clientfp.probe import h2_probe as hp
 
 from ..conftest import REPO
 from .conftest import Nginx
+from .tlsclient import BioClient
 
 pytestmark = [pytest.mark.nginx, pytest.mark.docker]
 
@@ -37,24 +37,23 @@ END_STREAM, END_HEADERS, PADDED, PRIORITY_FLAG = 0x1, 0x4, 0x8, 0x20
 @pytest.fixture(params=["pkg", "asan"])
 def srv(request: pytest.FixtureRequest) -> Iterator[Nginx]:
     n: Nginx = request.getfixturevalue(f"nginx_{request.param}")
-    offset = mark_logs(n)
+    mark = mark_logs(n)
     yield n
-    assert_healthy(n, offset)
+    assert_healthy(n, mark)
 
 
-def mark_logs(n: Nginx) -> int:
-    """Set earlier sanitizer reports aside and return the current error-log size, so a test is judged only by what
+def mark_logs(n: Nginx) -> list[int]:
+    """Set earlier sanitizer reports aside and return the error logs' current sizes, so a test is judged only by what
     happens during it (a crashed worker is replaced by the master, later tests stay meaningful)."""
-    out = n.exec("sh", "-c", "mkdir -p /tmp/seen; mv /tmp/asan.* /tmp/ubsan.* /tmp/seen/ 2>/dev/null; "
-                 f"cat {n.logs} 2>/dev/null | wc -c", check=False)
-    return int(out.split()[-1])
+    n.exec("sh", "-c", "mkdir -p /tmp/seen; mv /tmp/asan.* /tmp/ubsan.* /tmp/seen/ 2>/dev/null; true", check=False)
+    return n.log_mark()
 
 
-def assert_healthy(n: Nginx, offset: int = 0) -> None:
+def assert_healthy(n: Nginx, mark: list[int] | None = None) -> None:
     assert n.alive(), "nginx stopped answering"
-    report = n.exec("sh", "-c", "cat /tmp/asan.* /tmp/ubsan.* 2>/dev/null; "
-                    f"cat {n.logs} 2>/dev/null | tail -c +{offset + 1} | "
-                    "grep -h 'exited on signal\\|runtime error\\|AddressSanitizer'", check=False)
+    report = n.exec("sh", "-c", "cat /tmp/asan.* /tmp/ubsan.* 2>/dev/null", check=False)
+    report += "".join(line + "\n" for line in n.log_since(mark).splitlines()
+                      if re.search(r"exited on signal|runtime error|AddressSanitizer", line))
     assert report.strip() == "", report[-4000:]
 
 
@@ -454,50 +453,12 @@ FRAMINGS: dict[str, Callable[[bytes], bytes]] = {
 
 
 def handshake_in_pieces(port: int, framing: Callable[[bytes], bytes], segment: int, delay: float) -> tuple[str, str]:
-    """A real TLS client (Python's ssl over memory BIOs) whose first flight is re-framed and sent in TCP segments of
-    `segment` bytes, `delay` seconds apart. Returns (JA4 computed locally, JA4 the server reports)."""
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    ctx.set_alpn_protocols(["http/1.1"])
-    inc, out = ssl.MemoryBIO(), ssl.MemoryBIO()
-    tls = ctx.wrap_bio(inc, out, server_hostname="localhost")
-    try:
-        tls.do_handshake()
-    except ssl.SSLWantReadError:
-        pass
-    msg = ref_ja4.client_hello_from_records(out.read())
-    assert msg is not None
-    flight = framing(msg)
-
-    def pump() -> None:
-        if out.pending:
-            s.sendall(out.read())
-        data = s.recv(65536)
-        if not data:
-            raise ConnectionError("server closed the connection")
-        inc.write(data)
-
-    with socket.create_connection(("127.0.0.1", port), timeout=10) as s:
-        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        for i in range(0, len(flight), segment):
-            s.sendall(flight[i:i + segment])
-            time.sleep(delay)
-        while True:
-            try:
-                tls.do_handshake()
-                break
-            except ssl.SSLWantReadError:
-                pump()
-        tls.write(b"GET /fp HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-        resp = b""
-        while not resp.endswith(b"}\n"):
-            try:
-                resp += tls.read(65536)
-            except ssl.SSLWantReadError:
-                pump()
-    got = json.loads(resp.split(b"\r\n\r\n", 1)[1])["ja4"]
-    return ref_ja4.from_bytes(msg, "t").ja4, got
+    """A real TLS client whose first flight is re-framed and sent in TCP segments of `segment` bytes, `delay` seconds
+    apart. Returns (JA4 computed locally, JA4 the server reports)."""
+    with BioClient() as c:
+        c.connect(port)
+        c.send(framing(c.hello), segment, delay)
+        return c.ja4, c.fetch_fp()["ja4"]
 
 
 @pytest.mark.parametrize("framing", list(FRAMINGS))
