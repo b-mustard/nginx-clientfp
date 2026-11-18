@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import gzip
+import io
 import re
 import shutil
 import subprocess
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -27,6 +30,18 @@ def test_files_installed(nginx_pkg: Nginx) -> None:
     unit = nginx_pkg.exec("sh", "-c", "cat /usr/lib/systemd/system/nginx.service /lib/systemd/system/nginx.service "
                           "2>/dev/null", check=False)
     assert "ExecStart=/usr/sbin/nginx" in unit
+
+
+def test_changelog_names_the_distribution(deb: Path, nginx_pkg: Nginx) -> None:
+    """decision 041: the changelog's distribution field is the codename of the distribution the package is built
+    for, as that distribution's /etc/os-release gives it (not "unstable")."""
+    codename = nginx_pkg.exec("sh", "-c", ". /etc/os-release; echo $VERSION_CODENAME").strip()
+    data = subprocess.run(["dpkg-deb", "--fsys-tarfile", str(deb)], capture_output=True, check=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+        member = tar.extractfile("./usr/share/doc/nginx-clientfp/changelog.Debian.gz")
+        assert member is not None
+        first = gzip.decompress(member.read()).decode().splitlines()[0]
+    assert re.fullmatch(rf"nginx-clientfp \(\S+\) {re.escape(codename)}; urgency=medium", first), first
 
 
 def test_deb_contents(deb: Path) -> None:
