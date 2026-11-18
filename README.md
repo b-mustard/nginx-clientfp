@@ -43,8 +43,15 @@ of each series, clones or updates `extern_src/`, exports the tags into `build/`,
 `dpkg-buildpackage`, and verifies the result: `/usr/sbin/nginx` must link the distribution's libssl and contain the
 module and every patched hook.
 
-Native build dependencies: `build-essential debhelper dpkg-dev fakeroot lintian libpcre2-dev libssl-dev zlib1g-dev git`.
-Docker builds need only docker (rootless works).
+Native build dependencies:
+
+```sh
+sudo apt install git python3-venv build-essential debhelper dpkg-dev fakeroot lintian \
+    libpcre2-dev libssl-dev zlib1g-dev
+```
+
+Docker builds need `git`, `python3-venv` and docker (rootless works): `build.sh` and the source download run on the
+host, the package build runs in the container.
 
 ## Install
 
